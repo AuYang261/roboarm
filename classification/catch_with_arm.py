@@ -25,10 +25,10 @@ def main():
     arm.move_to_home(gripper_angle_deg=80)
     cam = open_camera(color=True, depth=False)
     model = load_model(model_path)
+    future = None
 
     while True:
         start_time = time.time()
-        futures = []
         try:
             frames = get_frames(cam)
             if frames is None:
@@ -38,9 +38,10 @@ def main():
                 continue
 
             detections = detect_objects_in_frame(model, frame)
-            for (x, y, w, h, r), score, class_id, class_name in detections:
-                futures.append(executor.submit(arm.catch, x, y, r))
-                draw_box(frame, x, y, w, h, np.rad2deg(r), f"{class_name}: {score:.2f}")
+            for (u, v, w, h, r), score, class_id, class_name in detections:
+                if future is None or future.done():
+                    future = executor.submit(arm.catch, u + 10, v + 10, r)
+                draw_box(frame, u, v, w, h, np.rad2deg(r), f"{class_name}: {score:.2f}")
 
             end_time = time.time()
             fps = 1 / (end_time - start_time)
@@ -59,8 +60,6 @@ def main():
 
         except KeyboardInterrupt:
             print("Exiting...")
-        for f in futures:
-            f.result()  # 等待所有任务完成
 
     arm.move_to_home(gripper_angle_deg=80)
     arm.disconnect_arm()

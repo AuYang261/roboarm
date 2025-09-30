@@ -3,6 +3,7 @@ from collections.abc import Sequence
 import sys
 import os
 from unicodedata import digit
+from pygame import init
 from pynput import keyboard
 import time
 
@@ -132,6 +133,7 @@ class Arm:
         gripper_angle_deg: float | int | None = None,
         rot_deg: float | int | None = None,
         warning: bool = True,
+        steps=20,
     ):
         """
         机械臂移动到指定位置，单位米
@@ -143,14 +145,23 @@ class Arm:
             raise ValueError("位置参数格式错误，应该是[x, y, z]")
         if warning and (pos[2] < 0.05 or pos[2] > 0.1):
             print("Warning: z轴位置建议在0.07米以恰好在桌面上")
-        angles_deg = np.rad2deg(
-            self.chain.inverse_kinematics(
-                kinpy.Transform(
-                    pos=np.array(pos), rot=[0, 0, np.deg2rad(rot_deg) if rot_deg else 0]
-                ),
-            )
-        ).tolist()
-        self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg)
+        angles_deg: list[float] = self.get_read_arm_angles()[0]  # type: ignore
+        if angles_deg is None:
+            print("获取当前机械臂角度失败，无法移动")
+            return None
+        init_tf: kinpy.Transform = self.chain.forward_kinematics(
+            np.deg2rad(angles_deg).tolist(), end_only=True
+        )  # type: ignore
+        goal_tf = kinpy.Transform(
+            pos=np.array(pos), rot=[0, 0, np.deg2rad(rot_deg) if rot_deg else 0]
+        )
+        for alpha in np.linspace(0, 1, steps):
+            # 插值末端位姿 (只插值位置，旋转保持目标值简化处理)
+            interp_pos = init_tf.pos * (1 - alpha) + goal_tf.pos * alpha
+            interp_tf = kinpy.Transform(pos=interp_pos, rot=goal_tf.rot)
+
+            angles_deg = np.rad2deg(self.chain.inverse_kinematics(interp_tf)).tolist()
+            self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg)
         return angles_deg
 
     def pixel2pos(self, u: float, v: float):
@@ -191,7 +202,7 @@ class Arm:
 
         # 移动机械臂到目标位置上方
         self.move_to(
-            [target_x, target_y, height + 0.1],
+            [target_x, target_y, height + 0.05],
             gripper_angle_deg=80,
             rot_deg=np.rad2deg(r),
             warning=False,
@@ -210,8 +221,8 @@ class Arm:
 
         # 抬起物体
         self.move_to(
-            [target_x, target_y, height + 0.1],
-            gripper_angle_deg=20,
+            [target_x, target_y, height + 0.05],
+            gripper_angle_deg=0,
             rot_deg=np.rad2deg(r),
             warning=False,
         )

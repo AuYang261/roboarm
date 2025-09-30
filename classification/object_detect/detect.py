@@ -18,21 +18,21 @@ def detect_objects_in_frame(model, frame, conf_thres=0.8, iou_thres=0.45):
     class_ids = results.obb.cls.cpu().numpy().astype(int)
     class_names = [model.names[i] for i in class_ids]
     return [
-        ((x, y, w, h, r), score, class_id, class_name)
-        for (x, y, w, h, r), score, class_id, class_name in zip(
+        ((u, v, w, h, r), score, class_id, class_name)
+        for (u, v, w, h, r), score, class_id, class_name in zip(
             detections, scores, class_ids, class_names
         )
     ]
 
 
-def draw_box(frame, x, y, w, h, angle_deg, label):
-    box_points = cv2.boxPoints(((x, y), (w, h), angle_deg))
+def draw_box(frame, u, v, w, h, angle_deg, label):
+    box_points = cv2.boxPoints(((u, v), (w, h), angle_deg))
     box_points = np.int0(box_points)
     cv2.drawContours(frame, [box_points], 0, (0, 255, 0), 2)
     cv2.putText(
         frame,
         label,
-        (int(x - w / 2), int(y - h / 2) - 10),
+        (int(u - w / 2), int(v - h / 2) - 10),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.5,
         (0, 255, 0),
