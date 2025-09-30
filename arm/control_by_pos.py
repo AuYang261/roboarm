@@ -12,35 +12,41 @@ import time
 from pynput import keyboard
 import threading
 
-POS: list[float] = [0, 0.1, 0.1, 0]  # x, y, z, gripper_angle_deg
+POS: list[float] = [0, 0.1, 0.1, 0, 0]  # x, y, z, gripper_angle_deg
 
 
 def on_press(key):
     global POS
     try:
-        if key.char == "w":
+        if key.char == "w" and POS[1] < 0.3:
             POS[1] += 0.01
             print("Current position:", POS)
-        elif key.char == "s":
+        elif key.char == "s" and POS[1] > 0:
             POS[1] -= 0.01
             print("Current position:", POS)
-        elif key.char == "a":
+        elif key.char == "a" and POS[0] > -0.2:
             POS[0] -= 0.01
             print("Current position:", POS)
-        elif key.char == "d":
+        elif key.char == "d" and POS[0] < 0.2:
             POS[0] += 0.01
             print("Current position:", POS)
+        elif key.char == "z" and POS[3] < 90:
+            POS[3] += 5
+            print("Current position:", POS)
+        elif key.char == "c" and POS[3] > 0:
+            POS[3] -= 5
+            print("Current position:", POS)
         elif key.char == "e":
-            POS[3] = 0
+            POS[4] = 0
             print("Current position:", POS)
         elif key.char == "q":
-            POS[3] = 80
+            POS[4] = 80
             print("Current position:", POS)
     except AttributeError:
-        if key == keyboard.Key.shift:
+        if key == keyboard.Key.shift and POS[2] > 0.05:
             POS[2] -= 0.01
             print("Current position:", POS)
-        elif key == keyboard.Key.space:
+        elif key == keyboard.Key.space and POS[2] < 0.2:
             POS[2] += 0.01
             print("Current position:", POS)
         elif key == keyboard.Key.esc:
@@ -71,7 +77,9 @@ def main():
                 arm.move_to_home(gripper_angle_deg=80)
                 arm.disconnect_arm()
                 exit(0)
-            arm.move_to(POS[:3], gripper_angle_deg=POS[3], warning=False)
+            arm.move_to(
+                POS[:3], gripper_angle_deg=POS[4], rot_deg=POS[3], warning=False
+            )
             time.sleep(0.1)
         except Exception as e:
             print("Error:", e)

@@ -69,13 +69,13 @@ class Arm:
 
     def set_arm_angles(
         self,
-        angles_deg: Sequence[float | int] | None,
-        gripper_angle_deg: float | int | None,
+        angles_deg: Sequence[float | int] | None = None,
+        gripper_angle_deg: float | int | None = None,
     ):
         """
         设置机械臂角度和夹爪张开角度
-        angles: 机械臂各关节角度列表，单位度，顺序从底座到末端执行器
-        gripper_angle: 夹爪张开角度，范围0-100，越大越开
+        angles: 机械臂各关节角度列表，单位度，顺序从底座到末端执行器，None表示不改变当前角度
+        gripper_angle: 夹爪张开角度，范围0-100，越大越开，单位度，None表示不改变当前角度
         """
         motor_names = list(self.arm.bus.motors.keys())
         action: dict[str, float] = {}
@@ -130,14 +130,13 @@ class Arm:
         self,
         pos: List[float],
         gripper_angle_deg: float | int | None = None,
+        rot_deg: float | int | None = None,
         warning: bool = True,
     ):
         """
         机械臂移动到指定位置，单位米
         pos: [x, y, z]
         """
-        if not hasattr(self, "hand_eye_calibration_matrix"):
-            raise ValueError("没有手眼标定数据，无法使用位置控制")
         if not hasattr(self, "chain"):
             raise ValueError("没有机械臂模型，无法使用位置控制")
         if len(pos) != 3:
@@ -146,11 +145,89 @@ class Arm:
             print("Warning: z轴位置建议在0.07米以恰好在桌面上")
         angles_deg = np.rad2deg(
             self.chain.inverse_kinematics(
-                kinpy.Transform(pos=np.array(pos), rot=[0, 0, 0])
+                kinpy.Transform(
+                    pos=np.array(pos), rot=[0, 0, np.deg2rad(rot_deg) if rot_deg else 0]
+                ),
             )
         ).tolist()
         self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg)
         return angles_deg
+
+    def pixel2pos(self, u: float, v: float):
+        """
+        将图像坐标转换为机械臂坐标系位置，单位米
+        u, v: 图像坐标，单位像素
+        height: 目标物体高度，单位米，默认0.07米
+        返回值: [x, y, z]
+        """
+        if not hasattr(self, "hand_eye_calibration_matrix"):
+            raise ValueError("没有手眼标定数据，无法转换图像坐标")
+        pixel_coords = np.array([[u], [v], [1]])
+        world_coords = self.hand_eye_calibration_matrix @ pixel_coords
+        world_coords /= world_coords[2]
+        target_x, target_y = world_coords[0, 0], world_coords[1, 0]
+        return [target_x, target_y]
+
+    def catch(
+        self,
+        u: float,
+        v: float,
+        r: float,
+        target_pos: list[float | int] = [0.2, 0.2],
+        height: float = 0.07,
+        time_interval_s: float = 0.5,
+    ):
+        """
+        机械臂抓取物体并放到指定位置
+        u, v: 图像坐标，单位像素
+        r: 物体旋转角度，单位弧度
+        target_pos: 放置位置，单位米，默认[0.2, 0.2]
+        height: 目标物体高度，单位米，默认0.07米
+        time_interval_s: 每个动作之间的时间间隔，单位秒，默认0.5秒
+        """
+
+        # 将图像坐标转换为机械臂坐标系
+        target_x, target_y = self.pixel2pos(u, v)
+
+        # 移动机械臂到目标位置上方
+        self.move_to(
+            [target_x, target_y, height + 0.1],
+            gripper_angle_deg=80,
+            rot_deg=np.rad2deg(r),
+            warning=False,
+        )
+        time.sleep(time_interval_s)
+
+        # 下降到目标位置
+        self.move_to(
+            [target_x, target_y, height], gripper_angle_deg=80, rot_deg=np.rad2deg(r)
+        )
+        time.sleep(time_interval_s)
+
+        # 夹紧物体
+        self.set_arm_angles(gripper_angle_deg=0)
+        time.sleep(time_interval_s)
+
+        # 抬起物体
+        self.move_to(
+            [target_x, target_y, height + 0.1],
+            gripper_angle_deg=20,
+            rot_deg=np.rad2deg(r),
+            warning=False,
+        )
+        time.sleep(time_interval_s)
+
+        # 放到指定位置
+        self.move_to(target_pos + [height + 0.1], gripper_angle_deg=0, warning=False)
+        time.sleep(time_interval_s)
+        self.move_to(target_pos + [height], gripper_angle_deg=0)
+        time.sleep(time_interval_s)
+        self.set_arm_angles(gripper_angle_deg=80)
+        time.sleep(time_interval_s)
+        self.move_to(target_pos + [height + 0.1], warning=False)
+        time.sleep(time_interval_s)
+        self.move_to_home(gripper_angle_deg=80)
+        time.sleep(time_interval_s)
 
 
 if __name__ == "__main__":
