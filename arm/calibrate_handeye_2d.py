@@ -40,7 +40,7 @@ POINTS = []
 
 
 # 收集图片和机械臂末端坐标数据
-def collect_image_pose(chain: kinpy.chain.SerialChain, image_points_path, pose_path):
+def collect_image_pose(image_points_path, angles_deg_list_path):
     # 定义鼠标事件回调函数
     def mouse_callback(event, x, y, flags, param):
         global POINTS
@@ -53,7 +53,7 @@ def collect_image_pose(chain: kinpy.chain.SerialChain, image_points_path, pose_p
     cv2.namedWindow(window_name)
     cv2.setMouseCallback(window_name, mouse_callback)
 
-    poses = []
+    angles_deg_list = []
     arm = Arm("COM3")
     arm.disable_torque()
     cam = open_camera(color=True, depth=False)
@@ -63,12 +63,6 @@ def collect_image_pose(chain: kinpy.chain.SerialChain, image_points_path, pose_p
             if angles_deg is None:
                 print("获取机械臂角度失败")
                 continue
-            print("机械臂角度:", angles_deg, "夹爪状态:", gripper)
-            end_pose = forward_kinematics(
-                chain=chain, joint_angles_rad=np.deg2rad(angles_deg).tolist()
-            )
-            print("夹爪位置:", end_pose.pos)
-            print("夹爪旋转矩阵:\n", end_pose.rot_mat)
 
             frames = get_frames(cam)
             color_image = frames.get("color")
@@ -80,18 +74,8 @@ def collect_image_pose(chain: kinpy.chain.SerialChain, image_points_path, pose_p
             if key == 27:
                 break
             elif key == ord(" "):
-                poses.append(
-                    np.array(
-                        [
-                            end_pose.pos[0],
-                            end_pose.pos[1],
-                            end_pose.pos[2],
-                            end_pose.rot_euler[0],
-                            end_pose.rot_euler[1],
-                            end_pose.rot_euler[2],
-                        ]
-                    )
-                )
+                angles_deg_list.append(angles_deg)
+                print("机械臂角度:", angles_deg, "夹爪状态:", gripper)
         except KeyboardInterrupt:
             break
     cv2.destroyAllWindows()
@@ -99,17 +83,43 @@ def collect_image_pose(chain: kinpy.chain.SerialChain, image_points_path, pose_p
     arm.disconnect_arm()
 
     np.save(image_points_path, np.array(POINTS))
-    np.save(pose_path, np.array(poses))
+    np.save(angles_deg_list_path, np.array(angles_deg_list))
 
-    return image_points_path, pose_path
+    return image_points_path, angles_deg_list_path
 
 
-def calibrate_2d(image_points_path, pose_path):
+def calibrate_2d(
+    chain: kinpy.chain.SerialChain, image_points_path, angles_deg_list_path
+):
     image_points = np.load(image_points_path).astype(np.float32)  # Nx2
-    poses = np.load(pose_path).astype(np.float32)  # Nx6
+    angles_deg_list = np.load(angles_deg_list_path).astype(np.float32)  # Nx6
 
-    assert image_points.shape[0] == poses.shape[0] and image_points.shape[0] >= 4
+    assert (
+        image_points.shape[0] == angles_deg_list.shape[0] and image_points.shape[0] >= 4
+    )
 
+    poses_list: list[kinpy.Transform] = []
+    for angles_deg in angles_deg_list:
+        end_pose = forward_kinematics(
+            chain=chain, joint_angles_rad=np.deg2rad(angles_deg).tolist()
+        )
+        poses_list.append(end_pose)
+    poses = np.array(
+        [
+            [
+                p.pos[0],
+                p.pos[1],
+                p.pos[2],
+                p.rot_euler[0],
+                p.rot_euler[1],
+                p.rot_euler[2],
+            ]
+            for p in poses_list
+        ],
+        dtype=np.float32,
+    )  # Nx6
+    print("机械臂末端位姿:")
+    print(poses)
     # 计算单应性矩阵 M
     # M 就是你的 "像素->机器人" 转换器
     M, mask = cv2.findHomography(image_points, poses[:, :2], cv2.RANSAC, 5.0)
@@ -143,11 +153,13 @@ def main():
     image_points_path = os.path.join(
         os.path.dirname(__file__), "hand-eye-data", "2d_image_points.npy"
     )
-    pose_path = os.path.join(os.path.dirname(__file__), "hand-eye-data", "2d_pose.npy")
+    angles_deg_list_path = os.path.join(
+        os.path.dirname(__file__), "hand-eye-data", "2d_angles_deg_list.npy"
+    )
     if not os.path.exists(os.path.dirname(image_points_path)):
         os.makedirs(os.path.dirname(image_points_path))
-    if not os.path.exists(os.path.dirname(pose_path)):
-        os.makedirs(os.path.dirname(pose_path))
+    if not os.path.exists(os.path.dirname(angles_deg_list_path)):
+        os.makedirs(os.path.dirname(angles_deg_list_path))
     homography_matrix_path = os.path.join(
         os.path.dirname(__file__), "hand-eye-data", "2d_homography.npy"
     )
@@ -157,26 +169,22 @@ def main():
             os.path.join(
                 os.path.dirname(__file__),
                 "..",
-                "low_cost_robot",
-                "ros2_ws",
-                "src",
-                "low_cost_robot_description",
                 "urdf",
                 "low_cost_robot.urdf",
             )
         ).read()
     )
 
-    collect_image_pose(chain, image_points_path, pose_path)
-    homography_matrix = calibrate_2d(image_points_path, pose_path)
+    collect_image_pose(image_points_path, angles_deg_list_path)
+    homography_matrix = calibrate_2d(chain, image_points_path, angles_deg_list_path)
     np.save(
         homography_matrix_path,
         homography_matrix,
     )
 
-    poses = np.load(pose_path).astype(np.float32)  # Nx6
-    print("机械臂末端位姿:")
-    print(poses)
+    angles_deg_list = np.load(angles_deg_list_path).astype(np.float32)  # Nx6
+    print("机械臂角度:")
+    print(angles_deg_list)
     points = np.load(image_points_path).astype(np.float32)  # Nx2
     print("图片上点的像素坐标:")
     print(points)

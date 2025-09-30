@@ -17,6 +17,7 @@ import time
 import threading
 
 
+# 这个类从https://blog.csdn.net/yangbisheng1121/article/details/128643477复制过来的
 class Calibration:
     def __init__(self):
         # 相机内参
@@ -232,10 +233,6 @@ def collect_image_pose():
             os.path.join(
                 os.path.dirname(__file__),
                 "..",
-                "low_cost_robot",
-                "ros2_ws",
-                "src",
-                "low_cost_robot_description",
                 "urdf",
                 "low_cost_robot.urdf",
             )

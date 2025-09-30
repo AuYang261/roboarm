@@ -1,4 +1,4 @@
-path: D:\@Project\wowrobo\wowrobo\classification\dataset_process\dataset
+path: /home/xjy/wowrobot/wowrobo/classification/dataset_process/dataset
 train: images/train
 val: images/val
 
