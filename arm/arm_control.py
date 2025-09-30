@@ -12,14 +12,20 @@ sys.path.append(
 from lerobot.robots.koch_follower import config_koch_follower, koch_follower
 from pathlib import Path
 from typing import Union, List
+import kinpy
+import numpy as np
 
 
 class Arm:
+
     def __init__(
         self,
         port,
         calibration_dir=os.path.join(os.path.dirname(__file__), "..", "calibration"),
         id="koch_follower",
+        hand_eye_calibration_file=os.path.join(
+            os.path.dirname(__file__), "hand-eye-data/2d_homography.npy"
+        ),
     ):
         config = config_koch_follower.KochFollowerConfig(
             port=port,
@@ -39,6 +45,23 @@ class Arm:
             ).readlines()
             if x.strip() != ""
         ]
+        if os.path.exists(hand_eye_calibration_file):
+            self.hand_eye_calibration_matrix = np.load(hand_eye_calibration_file)
+            with open(
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    "urdf",
+                    "low_cost_robot.urdf",
+                ),
+                "r",
+                encoding="utf-8",
+            ) as f:
+                urdf_content = f.read()
+            self.chain = kinpy.build_serial_chain_from_urdf(
+                urdf_content, "gripper_static_1"
+            )
+
         if len(self.offset) != 5:
             raise ValueError("机械臂offset文件格式错误，应该有5个值")
         self.arm = koch_follower.KochFollower(config)
@@ -93,18 +116,60 @@ class Arm:
     def disable_torque(self):
         self.arm.bus.disable_torque()
 
+    def move_to_home(self, gripper_angle_deg: float | int | None = None):
+        """
+        机械臂回到初始位置
+        """
+        self.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=gripper_angle_deg)
+        if hasattr(self, "chain"):
+            return self.chain.forward_kinematics([0, 0, 0, 0, 0], end_only=True)
+        else:
+            return None
+
+    def move_to(
+        self,
+        pos: List[float],
+        gripper_angle_deg: float | int | None = None,
+        warning: bool = True,
+    ):
+        """
+        机械臂移动到指定位置，单位米
+        pos: [x, y, z]
+        """
+        if not hasattr(self, "hand_eye_calibration_matrix"):
+            raise ValueError("没有手眼标定数据，无法使用位置控制")
+        if not hasattr(self, "chain"):
+            raise ValueError("没有机械臂模型，无法使用位置控制")
+        if len(pos) != 3:
+            raise ValueError("位置参数格式错误，应该是[x, y, z]")
+        if warning and (pos[2] < 0.05 or pos[2] > 0.1):
+            print("Warning: z轴位置建议在0.07米以恰好在桌面上")
+        angles_deg = np.rad2deg(
+            self.chain.inverse_kinematics(
+                kinpy.Transform(pos=np.array(pos), rot=[0, 0, 0])
+            )
+        ).tolist()
+        self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg)
+        return angles_deg
+
 
 if __name__ == "__main__":
     arm = Arm("COM3")
     time.sleep(1)
-    arm.set_arm_angles([0, 0, 0, 0, 0], gripper_angle=80)
+    arm.move_to_home(gripper_angle_deg=80)
     time.sleep(1)
     angles, gripper = arm.get_read_arm_angles()
     print("机械臂角度:", angles)
     print("夹爪状态:", gripper)
-    arm.set_arm_angles(None, gripper_angle=0)
+    arm.set_arm_angles(None, gripper_angle_deg=0)
     time.sleep(1)
     angles, gripper = arm.get_read_arm_angles()
     print("机械臂角度:", angles)
     print("夹爪状态:", gripper)
+    arm.move_to_home()
+    time.sleep(1)
+    arm.move_to([0.1, 0.1, 0.1])
+    time.sleep(1)
+    arm.move_to_home()
+    time.sleep(1)
     arm.disconnect_arm()

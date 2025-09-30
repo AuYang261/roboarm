@@ -127,14 +127,14 @@ def calibrate_2d(
 
 
 def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
-    # 测试单应性矩阵
+    """测试单应性矩阵"""
     image_point_homogeneous = np.array([image_point[0], image_point[1], 1.0])
     robot_point_homogeneous = M @ image_point_homogeneous
     robot_point = robot_point_homogeneous[:2] / robot_point_homogeneous[2]
     angles_deg = np.rad2deg(
         chain.inverse_kinematics(
             kinpy.Transform(
-                pos=np.array([robot_point[0], robot_point[1], 0]), rot=[0, 0, 0]
+                pos=np.array([robot_point[0], robot_point[1], 0.1]), rot=[0, 0, 0]
             )
         )
     )
@@ -175,12 +175,14 @@ def main():
         ).read()
     )
 
-    collect_image_pose(image_points_path, angles_deg_list_path)
-    homography_matrix = calibrate_2d(chain, image_points_path, angles_deg_list_path)
-    np.save(
-        homography_matrix_path,
-        homography_matrix,
-    )
+    # 采集数据
+    # collect_image_pose(image_points_path, angles_deg_list_path)
+    # 计算单应性矩阵
+    # homography_matrix = calibrate_2d(chain, image_points_path, angles_deg_list_path)
+    # np.save(
+    #     homography_matrix_path,
+    #     homography_matrix,
+    # )
 
     angles_deg_list = np.load(angles_deg_list_path).astype(np.float32)  # Nx6
     print("机械臂角度:")
