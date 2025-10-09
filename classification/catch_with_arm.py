@@ -39,9 +39,13 @@ def main():
 
             detections = detect_objects_in_frame(model, frame)
             for (u, v, w, h, r), score, class_id, class_name in detections:
+                angle_deg = np.rad2deg(r)
                 if future is None or future.done():
-                    future = executor.submit(arm.catch, u + 10, v + 10, r)
-                draw_box(frame, u, v, w, h, np.rad2deg(r), f"{class_name}: {score:.2f}")
+                    # 沿矩形较长边的朝向
+                    future = executor.submit(
+                        arm.catch, u, v, angle_deg if w < h else angle_deg + 90
+                    )
+                draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 
             end_time = time.time()
             fps = 1 / (end_time - start_time)
