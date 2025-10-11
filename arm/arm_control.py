@@ -81,12 +81,13 @@ class Arm:
         motor_names = list(self.arm.bus.motors.keys())
         action: dict[str, float] = {}
         if gripper_angle_deg is not None:
-            action[motor_names[-1] + ".pos"] = gripper_angle_deg
+            action[motor_names[-1] + ".pos"] = np.clip(gripper_angle_deg, 0, 100)
         if angles_deg is not None:
             for motor_name, angle_deg, offset in zip(
                 motor_names[:-1], angles_deg, self.offset, strict=True
             ):
-                action[motor_name + ".pos"] = angle_deg + offset
+                if angle_deg is not None:
+                    action[motor_name + ".pos"] = np.clip(angle_deg + offset, -180, 180)
         if len(action) > 0:
             self.arm.send_action(action)
 
@@ -152,15 +153,15 @@ class Arm:
         init_tf: kinpy.Transform = self.chain.forward_kinematics(
             np.deg2rad(angles_deg).tolist(), end_only=True
         )  # type: ignore
-        goal_tf = kinpy.Transform(
-            pos=np.array(pos), rot=[0, 0, np.deg2rad(rot_deg) if rot_deg else 0]
-        )
+        goal_tf = kinpy.Transform(pos=np.array(pos), rot=[0, 0, 0])
         for alpha in np.linspace(0, 1, steps):
             # 插值末端位姿 (只插值位置，旋转保持目标值简化处理)
             interp_pos = init_tf.pos * (1 - alpha) + goal_tf.pos * alpha
             interp_tf = kinpy.Transform(pos=interp_pos, rot=goal_tf.rot)
 
             angles_deg = np.rad2deg(self.chain.inverse_kinematics(interp_tf)).tolist()
+            if angles_deg is not None:
+                angles_deg[-1] = np.deg2rad(rot_deg) if rot_deg else 0
             self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg)
         return angles_deg
 
@@ -181,38 +182,47 @@ class Arm:
 
     def catch(
         self,
-        u: float,
-        v: float,
+        target_x: float,
+        target_y: float,
         r: float,
-        target_pos: list[float | int] = [0.2, 0.2],
+        place_pos: list[float | int] = [0.2, 0.2],
         height: float = 0.07,
         time_interval_s: float = 0.5,
+        gripper_threshold_deg: float | int = 5,
     ):
         """
         机械臂抓取物体并放到指定位置
-        u, v: 图像坐标，单位像素
+        target_x, target_y: 目标物体位置，单位米
         r: 物体旋转角度，单位弧度
-        target_pos: 放置位置，单位米，默认[0.2, 0.2]
+        place_pos: 放置位置，单位米，默认[0.2, 0.2]
         height: 目标物体高度，单位米，默认0.07米
         time_interval_s: 每个动作之间的时间间隔，单位秒，默认0.5秒
+        gripper_threshold_deg: 夹爪闭合角度阈值，单位度，默认5度，小于该值认为夹取失败
         """
 
-        # 将图像坐标转换为机械臂坐标系
-        target_x, target_y = self.pixel2pos(u, v)
-
         # 移动机械臂到目标位置上方
-        self.move_to(
+        res = self.move_to(
             [target_x, target_y, height + 0.05],
             gripper_angle_deg=80,
             rot_deg=np.rad2deg(r),
             warning=False,
         )
+        if res is None:
+            print("移动到目标位置失败，取消抓取")
+            self.move_to_home(gripper_angle_deg=80)
+            return
         time.sleep(time_interval_s)
 
         # 下降到目标位置
-        self.move_to(
-            [target_x, target_y, height], gripper_angle_deg=80, rot_deg=np.rad2deg(r)
+        res = self.move_to(
+            [target_x, target_y, height],
+            gripper_angle_deg=80,
+            rot_deg=np.rad2deg(r),
         )
+        if res is None:
+            print("移动到目标位置失败，取消抓取")
+            self.move_to_home(gripper_angle_deg=80)
+            return
         time.sleep(time_interval_s)
 
         # 夹紧物体
@@ -220,22 +230,47 @@ class Arm:
         time.sleep(time_interval_s)
 
         # 抬起物体
-        self.move_to(
+        res = self.move_to(
             [target_x, target_y, height + 0.05],
             gripper_angle_deg=0,
             rot_deg=np.rad2deg(r),
             warning=False,
         )
+        if res is None:
+            print("移动到目标位置失败，取消抓取")
+            self.move_to_home(gripper_angle_deg=80)
+            return
         time.sleep(time_interval_s)
 
+        # 确认夹紧成功
+        angles, gripper = self.get_read_arm_angles()
+        if gripper is None or gripper < gripper_threshold_deg:
+            print("夹取失败")
+            self.move_to_home(gripper_angle_deg=80)
+            return
+
         # 放到指定位置
-        self.move_to(target_pos + [height + 0.1], gripper_angle_deg=0, warning=False)
+        res = self.move_to(
+            place_pos + [height + 0.1], gripper_angle_deg=0, warning=False
+        )
+        if res is None:
+            print("移动到目标位置失败，取消抓取")
+            self.move_to_home(gripper_angle_deg=80)
+            return
         time.sleep(time_interval_s)
-        self.move_to(target_pos + [height], gripper_angle_deg=0)
+        res = self.move_to(place_pos + [height], gripper_angle_deg=0)
+        if res is None:
+            print("移动到目标位置失败，取消抓取")
+            self.move_to_home(gripper_angle_deg=80)
+            return
         time.sleep(time_interval_s)
         self.set_arm_angles(gripper_angle_deg=80)
         time.sleep(time_interval_s)
-        self.move_to(target_pos + [height + 0.1], warning=False)
+        res = self.move_to(place_pos + [height + 0.1], warning=False)
+        if res is None:
+            print("移动到目标位置失败，取消抓取")
+            self.move_to_home(gripper_angle_deg=80)
+            return
         time.sleep(time_interval_s)
         self.move_to_home(gripper_angle_deg=80)
         time.sleep(time_interval_s)
@@ -243,6 +278,9 @@ class Arm:
 
 if __name__ == "__main__":
     arm = Arm("COM3")
+    # arm.disable_torque()
+    # while True:
+    #     print(arm.get_read_arm_angles())
     time.sleep(1)
     arm.move_to_home(gripper_angle_deg=80)
     time.sleep(1)

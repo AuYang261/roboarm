@@ -176,13 +176,13 @@ def main():
     )
 
     # 采集数据
-    # collect_image_pose(image_points_path, angles_deg_list_path)
+    collect_image_pose(image_points_path, angles_deg_list_path)
     # 计算单应性矩阵
-    # homography_matrix = calibrate_2d(chain, image_points_path, angles_deg_list_path)
-    # np.save(
-    #     homography_matrix_path,
-    #     homography_matrix,
-    # )
+    homography_matrix = calibrate_2d(chain, image_points_path, angles_deg_list_path)
+    np.save(
+        homography_matrix_path,
+        homography_matrix,
+    )
 
     angles_deg_list = np.load(angles_deg_list_path).astype(np.float32)  # Nx6
     print("机械臂角度:")

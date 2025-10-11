@@ -41,9 +41,40 @@ def main():
             for (u, v, w, h, r), score, class_id, class_name in detections:
                 angle_deg = np.rad2deg(r)
                 if future is None or future.done():
-                    # 沿矩形较长边的朝向
+                    # 将图像坐标转换为机械臂坐标系
+                    target_x, target_y = arm.pixel2pos(u, v)
+                    box_points = cv2.boxPoints(((u, v), (w, h), angle_deg))
+                    # 计算较长边的两顶点
+                    if np.linalg.norm(box_points[0] - box_points[1]) > np.linalg.norm(
+                        box_points[1] - box_points[2]
+                    ):
+                        box_points = (
+                            [box_points[0], box_points[1]]
+                            if box_points[0][0] < box_points[1][0]
+                            else [box_points[1], box_points[0]]
+                        )
+                    else:
+                        box_points = (
+                            [box_points[1], box_points[2]]
+                            if box_points[1][0] < box_points[2][0]
+                            else [box_points[2], box_points[1]]
+                        )
+                    # gripper_angle_rad 沿着物体长边方向，在[-pi/2, pi/2]范围内
+                    gripper_angle_rad = np.pi / 2 + np.arctan2(
+                        box_points[1][1] - box_points[0][1],
+                        box_points[1][0] - box_points[0][0],
+                    )
+                    if gripper_angle_rad > np.pi / 2:
+                        gripper_angle_rad -= np.pi
+
+                    # 夹爪向外偏移一些，避免刚好顶到物体
+                    offset = 0.00
                     future = executor.submit(
-                        arm.catch, u, v, angle_deg if w < h else angle_deg + 90
+                        arm.catch,
+                        target_x + offset * np.cos(gripper_angle_rad),
+                        target_y + offset * np.sin(-gripper_angle_rad),
+                        np.rad2deg(gripper_angle_rad),
+                        [0.2, 0.1],
                     )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 
