@@ -73,8 +73,8 @@ def main():
                         arm.catch,
                         target_x + offset * np.cos(gripper_angle_rad),
                         target_y + offset * np.sin(-gripper_angle_rad),
-                        np.rad2deg(gripper_angle_rad),
-                        [0.2, 0.1],
+                        gripper_angle_rad,
+                        [0.2, 0.0],
                     )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 
