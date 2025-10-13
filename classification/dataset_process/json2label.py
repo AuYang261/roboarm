@@ -6,8 +6,18 @@ import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import yaml
 
-class_names = ["white_chess", "black_chess", "red_block", "blue_block", "gray_block"]
+class_names = list(
+    yaml.safe_load(
+        open(
+            os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), "object_detect", "data.yaml"
+            ),
+            "r",
+        )
+    )["names"].values()
+)
 
 
 def get_file_list(path, file_list):
@@ -169,12 +179,17 @@ def obb_label_to_img(img_path, label_path, save_path):
 
 
 if __name__ == "__main__":
-    path_img = os.path.dirname(os.path.abspath(__file__)) + r"\dataset\original"
+    path_img = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "dataset", "original"
+    )
 
-    label_save_path = os.path.dirname(os.path.abspath(__file__)) + r"\dataset\labels"
+    label_save_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "dataset", "labels"
+    )
 
-    if not os.path.exists(label_save_path):
-        os.makedirs(label_save_path)
+    if os.path.exists(label_save_path):
+        shutil.rmtree(label_save_path)
+    os.makedirs(label_save_path)
     for j in tqdm(os.listdir(path_img)):
         if j.endswith(".json"):
             continue

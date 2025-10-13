@@ -29,7 +29,11 @@ def main():
         cv2.imshow("Camera", frames["color"])
         key = cv2.waitKey(1)
         if key == ord("c") or key == ord(" "):  # 按 'c'/空格 键拍照
-            img_name = os.path.join(dataset_path, f"img_{img_count:03d}.png")
+            while True:
+                img_name = os.path.join(dataset_path, f"img_{img_count:03d}.png")
+                if not os.path.exists(img_name):
+                    break
+                img_count += 1
             cv2.imwrite(img_name, frames["color"])
             print(f"Captured {img_name}")
             img_count += 1

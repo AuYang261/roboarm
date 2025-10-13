@@ -8,7 +8,10 @@ names:
   2: red_block
   3: blue_block
   4: gray_block
-nc: 5
+  5: black_screw
+  6: black_block
+  7: white_block
+nc: 8
 
 # 数据增强参数，见https://docs.ultralytics.com/zh/guides/yolo-data-augmentation/
 
