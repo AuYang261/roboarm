@@ -54,11 +54,11 @@ def start_camera_server(host: str, port: int, camera_index: int, mode: str = "DE
         return
 
     pipeline.start(config)
-    last_print_time = time.time()
+    
     def generate_frames():
+        last_print_time = time.time()
         while True:
             try:
-                
                 frames = pipeline.wait_for_frames(100)
                 if frames is None:
                     continue
@@ -88,7 +88,7 @@ def start_camera_server(host: str, port: int, camera_index: int, mode: str = "DE
 
                 current_time = time.time()
                 if current_time - last_print_time >= PRINT_INTERVAL:
-                    print("center distance: ", center_distance)
+                    # print("center distance: ", center_distance)
                     last_print_time = current_time
 
                 depth_image = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
