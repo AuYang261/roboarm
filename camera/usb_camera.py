@@ -78,6 +78,16 @@ if __name__ == '__main__':
     # orb ir : {ca3e7ab9-b4c3-4ae6-8251-579ef933890f}
     # orb rgb : {ca3e7ab9-b4c3-4ae6-8251-579ef933890f}
     
+    '''
+    [
+        {'index': 0, 'name': 'Orbbec Gemini 215 RGB Camera', 'guid': '{ca3e7ab9-b4c3-4ae6-8251-579ef933890f}', 'vid_pid': 'VID_2BC5&PID_0808'}
+        {'index': 1, 'name': 'Orbbec Gemini 215 IR Camera', 'guid': '{ca3e7ab9-b4c3-4ae6-8251-579ef933890f}', 'vid_pid': 'VID_2BC5&PID_0808'}
+        {'index': 2, 'name': 'Integrated Camera', 'guid': '{ca3e7ab9-b4c3-4ae6-8251-579ef933890f}', 'vid_pid': 'VID_174F&PID_246F'}
+        {'index': 3, 'name': 'Orbbec Gemini 215 Depth Camera', 'guid': '{ca3e7ab9-b4c3-4ae6-8251-579ef933890f}', 'vid_pid': 'VID_2BC5&PID_0808'}
+        {'index': 4, 'name': 'USB2.0_CAM1', 'guid': '{ca3e7ab9-b4c3-4ae6-8251-579ef933890f}', 'vid_pid': 'VID_05A3&PID_9230'}
+    ]
+    '''
+    
     camera_list = get_camera_list()
     print(camera_list)
     

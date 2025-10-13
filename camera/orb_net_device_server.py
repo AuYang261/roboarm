@@ -7,7 +7,7 @@ import numpy as np
 from flask import Flask, Response
 from pyorbbecsdk import *
 from utils import frame_to_bgr_image
-
+import argparse
 
 ESC_KEY = 27
 
@@ -27,7 +27,9 @@ def start_camera_server(host: str, port: int, camera_index: int, mode: str = "RG
     try:
         profile_list = pipeline.get_stream_profile_list(sensor_type)
         try:
-            color_profile: VideoStreamProfile = profile_list.get_video_stream_profile(640, 0, OBFormat.RGB, 30)
+            # 1280*720
+            # color_profile: VideoStreamProfile = profile_list.get_video_stream_profile(640, 0, OBFormat.RGB, 30)
+            color_profile: VideoStreamProfile = profile_list.get_video_stream_profile(1280, 720, OBFormat.RGB, 30)
         except OBError as e:
             print(e)
             color_profile = profile_list.get_default_video_stream_profile()
@@ -68,17 +70,26 @@ def start_camera_server(host: str, port: int, camera_index: int, mode: str = "RG
     def video_feed():
         return Response(generate_frames(),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
-
-    app.run(host=host, port=port)
     
+    app.run(host=host, port=port, threaded=True, use_reloader=False)
     pipeline.stop()
+
     
     
 
 def main():
-    host = "localhost"
-    port = 8080
-    camera_index = 4  # default camera index; change if needed
+    # 读取 args 读取 host 和 port
+    # python orb_net_device_server.py --host 0.0.0.0 --port 8081
+
+    parser = argparse.ArgumentParser(description="ORB-NET Camera Server")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind the server")
+    parser.add_argument("--port", type=int, default=8081, help="Port to bind the server")
+    parser.add_argument("--camera_index", type=int, default=4, help="Camera index")
+    args = parser.parse_args()
+
+    host = args.host
+    port = args.port
+    camera_index = args.camera_index
 
     start_camera_server(host, port, camera_index, video_type="mjpeg")
 
