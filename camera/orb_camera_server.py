@@ -1,4 +1,7 @@
 
+# python camera/orb_camera_server.py --host 127.0.0.1 --port 8083 --mode multi
+
+
 import cv2
 import numpy as np
 from pyorbbecsdk import *
@@ -211,6 +214,7 @@ class TemporalFilter:
         self.previous_frame = result
         return result
 
+# 存在问题，传输速度过慢
 def start_dict_server(host, port):
 
     app = Flask(__name__)
@@ -423,7 +427,6 @@ def start_depth_server(host, port):
     
     pipeline.stop()
 
-
 global_processed_frames = None
 global_ir_frame = None
 metadata_lock = threading.Lock()
@@ -511,11 +514,38 @@ def start_multi_server(host, port):
     
     pipeline.stop()
 
+def start_usb_camera_server(host: str, port: int, camera_index: int):
+    from flask import Flask, Response
+
+    app = Flask(__name__)
+    cap = cv2.VideoCapture(camera_index)
+
+    def generate_frames():
+        while True:
+            success, frame = cap.read()
+            if not success:
+                break
+            else:
+                ret, buffer = cv2.imencode('.jpg', frame)
+                frame = buffer.tobytes()
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
+    @app.route('/video_feed')
+    def video_feed():
+        return Response(generate_frames(),
+                        mimetype='multipart/x-mixed-replace; boundary=frame')
+
+    app.run(host=host, port=port)
+
+    cap.release()
+
 
 def main():
     parser = argparse.ArgumentParser(description="ORB-NET Camera Server")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind the server")
     parser.add_argument("--port", type=int, default=8081, help="Port to bind the server")
+    parser.add_argument("--idx", type=int, default=4, help="camera index")
     parser.add_argument("--mode", type=str, default="multi", help="Video source (default: rgb)")
     args = parser.parse_args()
     if args.mode == "none":
@@ -528,6 +558,8 @@ def main():
         start_depth_server(args.host, args.port)
     elif args.mode == "multi":
         start_multi_server(args.host, args.port)
+    elif args.mode == "usb":
+        start_usb_camera_server(args.host, args.port, args.idx)
 
 if __name__ == "__main__":
     main()
