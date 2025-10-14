@@ -96,6 +96,8 @@ def start_camera_server(host: str, port: int, camera_index: int, mode: str = "DE
 
                 frame = cv2.imencode('.jpg', depth_image)[1].tobytes()
                 
+                # 返回一段符合 MJPEG（multipart/x-mixed-replace）协议的数据片段
+                # 代表“一个 JPEG 帧”，由 Flask 的 Response 直接写入 HTTP 响应流
                 yield (b'--frame\r\n'
                     b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
                 

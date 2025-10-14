@@ -66,16 +66,14 @@ def start_camera_server(host: str, port: int, camera_index: int, mode: str = "RG
             except KeyboardInterrupt:
                 pass
         
-    @app.route('/video_feed')
-    def video_feed():
+    @app.route('/video_feed_color')
+    def video_feed_color():
         return Response(generate_frames(),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
     
     app.run(host=host, port=port, threaded=True, use_reloader=False)
     pipeline.stop()
 
-    
-    
 
 def main():
     # 读取 args 读取 host 和 port
