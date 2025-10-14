@@ -17,3 +17,30 @@ def open_camera(camera_index=0):
         raise ValueError(f"Unable to open camera with index {camera_index}")
 
     return cap
+
+
+def close_camera(cap):
+    """
+    Releases the camera resource.
+
+    Parameters:
+        cap: Video capture object to release.
+    """
+    cap.release()
+    cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    cap = open_camera(0)
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Failed to grab frame")
+            break
+
+        cv2.imshow("USB Camera", frame)
+
+        # Exit on 'q' key
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
+    close_camera(cap)
