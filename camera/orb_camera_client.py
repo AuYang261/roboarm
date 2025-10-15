@@ -13,6 +13,26 @@ import signal
 # Global stop event for graceful shutdown
 stop_event = threading.Event()
 
+def open_orb_web_camera(host: str, port: int, color: bool = True, depth: bool = False):
+    url1 = f"http://{host}:{port}/rgb_stream"
+    url2 = f"http://{host}:{port}/depth_stream"
+
+    cap1 = None
+    cap2 = None
+    if color :
+        cap1 = cv2.VideoCapture(url1)
+    if depth:
+        cap2 = cv2.VideoCapture(url2)
+
+    return cap1, cap2
+
+def close_orb_web_camera(cap1, cap2):
+    if cap1 is not None:
+        cap1.release()
+    if cap2 is not None:
+        cap2.release()
+    
+
 def start_rgb_client(host: str, port: int):
     url = f"http://{host}:{port}/rgb_stream"
     print(f"Connecting to {url}")
