@@ -9,7 +9,7 @@ from classification.object_detect.detect import (
     load_model,
     draw_box,
 )
-from camera.orb_camera import open_camera, get_frames, close_camera
+from camera.camera import Camera
 import cv2
 import time
 import concurrent.futures
@@ -23,14 +23,14 @@ def main():
 
     arm = Arm(port="COM3")
     arm.move_to_home(gripper_angle_deg=80)
-    cam = open_camera(color=True, depth=False)
+    cam = Camera(color=True, depth=False)
     model = load_model(model_path)
     future = None
 
     while True:
         start_time = time.time()
         try:
-            frames = get_frames(cam)
+            frames = cam.get_frames()
             if frames is None:
                 continue
             frame = frames.get("color")
@@ -106,7 +106,7 @@ def main():
 
     arm.move_to_home(gripper_angle_deg=80)
     arm.disconnect_arm()
-    close_camera(cam)
+    cam.close()
     cv2.destroyAllWindows()
 
 
