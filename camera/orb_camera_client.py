@@ -1,4 +1,3 @@
-
 # python camera/orb_camera_client.py --host 127.0.0.1 --port 8083 --mode multi
 
 import cv2
@@ -26,12 +25,13 @@ def open_orb_web_camera(host: str, port: int, color: bool = True, depth: bool = 
 
     return cap1, cap2
 
-def close_orb_web_camera(cap1, cap2):
+
+def close_orb_web_camera(cap1=None, cap2=None):
     if cap1 is not None:
         cap1.release()
     if cap2 is not None:
         cap2.release()
-    
+
 
 def start_rgb_client(host: str, port: int):
     url = f"http://{host}:{port}/rgb_stream"

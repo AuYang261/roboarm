@@ -29,7 +29,7 @@ class Camera:
         else:
             frame_rgb = None
             frame_depth = None
-            
+
             if self.cap_rgb is not None:
                 ret, frame_rgb = self.cap_rgb.read()
             if self.cap_depth is not None:
@@ -40,8 +40,7 @@ class Camera:
         if self.ip == "":
             orb_camera.close_camera(self.pipeline)
         else:
-            orb_camera_client.close_orb_web_camera(self.cap)
-
+            orb_camera_client.close_orb_web_camera(self.cap_rgb, self.cap_depth)
 
 
 def main():
@@ -62,7 +61,7 @@ def main():
             break
 
     cv2.destroyAllWindows()
-    
+
 
 if __name__ == "__main__":
     main()

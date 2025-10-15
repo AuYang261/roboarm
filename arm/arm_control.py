@@ -2,9 +2,6 @@
 from collections.abc import Sequence
 import sys
 import os
-from unicodedata import digit
-from pygame import init
-from pynput import keyboard
 import time
 
 sys.path.append(

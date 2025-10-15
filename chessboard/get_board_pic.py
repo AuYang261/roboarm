@@ -9,13 +9,13 @@ from polars import col
 from requests import get
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from camera.orb_camera import open_camera, close_camera, get_frames
+from camera.camera_api import Camera
 
 
 POINTS = []
 
 
-def get_4_corners(cap):
+def get_4_corners(cap: Camera):
     global POINTS
 
     # 定义鼠标事件回调函数
@@ -35,7 +35,7 @@ def get_4_corners(cap):
     cv2.setMouseCallback(window_name, mouse_callback)
 
     while True:
-        frames = get_frames(cap)
+        frames = cap.get_frames()
         color_frame = frames.get("color")
         if color_frame is None:
             print("Failed to grab frame")
@@ -83,7 +83,7 @@ def get_4_corners(cap):
 def main():
     global POINTS
     print("Opening camera...")
-    cap = open_camera(True, False)
+    cap = Camera(color=True, depth=False)
     if not os.path.exists("points.txt"):
         get_4_corners(cap)
     else:
@@ -102,7 +102,7 @@ def main():
     if POINTS[2][0] < POINTS[3][0]:
         POINTS[2], POINTS[3] = POINTS[3], POINTS[2]
     print(f"Loaded points: {POINTS}")
-    while (color_frame := get_frames(cap).get("color")) is None:
+    while (color_frame := cap.get_frames().get("color")) is None:
         print("Failed to grab frame")
     width, height = color_frame.shape[1], color_frame.shape[0]
     # 将角点往外扩展几个像素
@@ -127,7 +127,7 @@ def main():
     M = cv2.getPerspectiveTransform(pts1, pts2)
 
     while True:
-        color_frame = get_frames(cap).get("color")
+        color_frame = cap.get_frames().get("color")
         if color_frame is None:
             print("Failed to grab frame")
             continue
@@ -140,7 +140,7 @@ def main():
         # Exit on 'q' key
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
-    close_camera(cap)
+    cap.close()
 
 
 if __name__ == "__main__":
