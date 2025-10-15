@@ -23,7 +23,7 @@ class Camera:
         else:
             self.cap_rgb, self.cap_depth = orb_camera_client.open_orb_web_camera(ip, port, color, depth)
 
-    def get_frames(self):
+    def get_frames(self) -> dict:
         if self.ip == "":
             return orb_camera.get_frames(self.pipeline)
         else:
@@ -34,8 +34,7 @@ class Camera:
                 ret, frame_rgb = self.cap_rgb.read()
             if self.cap_depth is not None:
                 ret, frame_depth = self.cap_depth.read()
-            
-            return frame_rgb, frame_depth
+            return {"color": frame_rgb, "depth": frame_depth}
 
     def close(self):
         if self.ip == "":

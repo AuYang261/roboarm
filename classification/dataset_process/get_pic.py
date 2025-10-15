@@ -1,20 +1,17 @@
 # Description: 控制usb相机，获取图片用来构建数据集
 import cv2
-import numpy as np
 import os
 import sys
-
-from requests import get
 
 sys.path.append(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
-from camera.orb_camera import open_camera, get_frames, close_camera
+from camera.camera_api import Camera
 
 
 def main():
     print("Opening camera...")
-    cap = open_camera(True, False)
+    cam = Camera(color=True, depth=False)
     dataset_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "dataset", "original"
     )
@@ -22,7 +19,7 @@ def main():
         os.makedirs(dataset_path)
     img_count = 0
     while True:
-        frames = get_frames(cap)
+        frames = cam.get_frames()
         if frames.get("color") is None:
             print("Failed to grab frame")
             continue
@@ -40,7 +37,7 @@ def main():
         elif key == ord("q"):  # 按 'q' 键退出
             print("Exiting...")
             break
-    close_camera(cap)
+    cam.close()
     cv2.destroyAllWindows()
 
 

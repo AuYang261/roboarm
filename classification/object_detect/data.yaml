@@ -15,17 +15,17 @@ nc: 8
 
 # 数据增强参数，见https://docs.ultralytics.com/zh/guides/yolo-data-augmentation/
 
-hsv_h: 0.015
-hsv_s: 0.7
-hsv_v: 0.4
+hsv_h: 0.15
+hsv_s: 0.8
+hsv_v: 0.5
 
 degrees: 180.0
-translate: 0.5
+translate: 0.6
 scale: 0.5
-shear: 10.0
-perspective: 0.002
+shear: 30.0
+perspective: 0.005
 flipud: 0.5
 fliplr: 0.5
 mosaic: 1.0
-mixup: 0.1
-cutmix: 0.3
+mixup: 0.3
+cutmix: 0.5
