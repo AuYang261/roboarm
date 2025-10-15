@@ -37,7 +37,14 @@ def main():
             if frame is None:
                 continue
 
-            detections = detect_objects_in_frame(model, frame)
+            detections = detect_objects_in_frame(model, frame, conf_thres=0.7)
+            if len(detections) == 0 and (future is None or future.done()):
+                # 移到旁边以免挡住视野
+                future = executor.submit(
+                    arm.move_to,
+                    [0.1, 0.0, 0.12],
+                    80,
+                )
             for (u, v, w, h, r), score, class_id, class_name in detections:
                 angle_deg = np.rad2deg(r)
                 if future is None or future.done():
@@ -75,6 +82,7 @@ def main():
                         target_y + offset * np.sin(-gripper_angle_rad),
                         gripper_angle_rad,
                         [0.2, 0.0],
+                        0.075,
                     )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 

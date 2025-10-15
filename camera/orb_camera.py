@@ -2,7 +2,7 @@
 # 安装pyorbbecsdk库见https://orbbec.github.io/pyorbbecsdk/source/2_installation/install_the_package.html
 # 此外还需注册元数据，见https://orbbec.github.io/pyorbbecsdk/source/2_installation/registration_script.html
 # ******************************************************************************
-import imp
+
 from pyorbbecsdk import (
     Config,
     Pipeline,
