@@ -1,10 +1,16 @@
-
 # python camera/orb_camera_server.py --host 127.0.0.1 --port 8083 --mode multi
-
 
 import cv2
 import numpy as np
-from pyorbbecsdk import *
+from pyorbbecsdk import (
+    Pipeline,
+    Config,
+    OBSensorType,
+    OBFrameType,
+    OBFormat,
+    OBError,
+    VideoStreamProfile,
+)
 from utils import frame_to_bgr_image
 import argparse
 import time, json, threading
@@ -260,7 +266,7 @@ def start_dict_server(host, port):
             # create display
             # display = create_display(processed_frames, DISPLAY_WIDTH, DISPLAY_HEIGHT)
             # cv2.imshow(WINDOW_NAME, display)
-            
+
             idx += 1
             data = {
                     "ts": time.time(),
@@ -273,17 +279,16 @@ def start_dict_server(host, port):
                 b'Content-Type: application/json\r\n\r\n'
                 + json.dumps(data).encode() +
                 b'\r\n')
-    
-        
+
     @app.route('/dict_stream')
     def dict_stream():
         return Response(dict_generator(),
                         mimetype='multipart/x-mixed-replace; boundary=dictboundary')
-    
+
     app.run(host=host, port=port, threaded=True, use_reloader=False)
 
     pipeline.stop()
-    
+
 def start_rgb_server(host, port):
     
     sensor_type = OBSensorType.COLOR_SENSOR

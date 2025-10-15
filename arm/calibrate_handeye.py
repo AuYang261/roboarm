@@ -1,3 +1,4 @@
+# 三位手眼标定，存在标定板固定困难和相机视角范围过小的问题，未测试过，故暂不可用
 from collections.abc import Sequence
 import sys
 import os
