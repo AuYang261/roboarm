@@ -16,11 +16,11 @@ class Camera:
         else:
             pass
 
-    def get_frames(self):
+    def get_frames(self) -> dict:
         if self.ip == "":
             return orb_camera.get_frames(self.pipeline)
         else:
-            pass
+            return {"color": None, "depth": None}
 
     def close(self):
         if self.ip == "":
