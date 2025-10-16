@@ -1,3 +1,4 @@
+# Description: 调用目标识别和机械臂控制，实现抓取功能。
 import sys
 import os
 

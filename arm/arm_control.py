@@ -24,7 +24,7 @@ class Arm:
         hand_eye_calibration_file=os.path.join(
             os.path.dirname(__file__), "hand-eye-data/2d_homography.npy"
         ),
-        steps=5,
+        steps=20,
     ):
         """
         初始化机械臂
@@ -96,7 +96,7 @@ class Arm:
         if len(action) > 0:
             current_angles_deg, current_gripper_deg = self.get_read_arm_angles()
             if current_angles_deg is None or current_gripper_deg is None:
-                self.arm.set_action(action)
+                self.arm.send_action(action)
                 return
             current_angles_deg.append(current_gripper_deg)
             # 对角度插值
@@ -112,7 +112,7 @@ class Arm:
                         else 0
                     )
                 self.arm.send_action(interp_action)
-                time.sleep(0.05)
+                time.sleep(0.5 / self.steps)
 
     def get_read_arm_angles(
         self,
@@ -287,7 +287,7 @@ class Arm:
 
 
 if __name__ == "__main__":
-    arm = Arm("COM3")
+    arm = Arm("/dev/ttyACM0")
     # arm.disable_torque()
     # while True:
     #     print(arm.get_read_arm_angles())

@@ -1,4 +1,4 @@
-# Description: 控制usb相机，获取图片用来构建数据集
+# Description: 控制相机获取图片用来构建数据集
 import cv2
 import os
 import sys
