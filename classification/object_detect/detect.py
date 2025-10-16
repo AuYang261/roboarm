@@ -27,7 +27,7 @@ def detect_objects_in_frame(model, frame, conf_thres=0.8, iou_thres=0.45):
 
 def draw_box(frame, u, v, w, h, angle_deg, label):
     box_points = cv2.boxPoints(((u, v), (w, h), angle_deg))
-    box_points = np.int0(box_points)
+    box_points = np.int64(box_points)
     cv2.drawContours(frame, [box_points], 0, (0, 255, 0), 2)
     cv2.putText(
         frame,

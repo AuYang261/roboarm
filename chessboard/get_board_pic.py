@@ -83,7 +83,7 @@ def get_4_corners(cap: Camera):
 def main():
     global POINTS
     print("Opening camera...")
-    cap = Camera(color=True, depth=False)
+    cap = Camera(ip="192.168.189.1", color=True, depth=False)
     if not os.path.exists("points.txt"):
         get_4_corners(cap)
     else:

@@ -24,7 +24,7 @@ class Arm:
         hand_eye_calibration_file=os.path.join(
             os.path.dirname(__file__), "hand-eye-data/2d_homography.npy"
         ),
-        steps=10,
+        steps=5,
     ):
         """
         初始化机械臂
@@ -32,7 +32,7 @@ class Arm:
         calibration_dir: 标定文件夹路径，包含机械臂offset文件
         id: 机械臂型号，默认"koch_follower"
         hand_eye_calibration_file: 手眼标定文件路径，默认"hand-eye-data/2d_homography.npy"
-        steps: 机械臂插值移动步数，默认20，步数越多越平滑但越慢
+        steps: 机械臂插值移动步数，步数越多越平滑但越慢
         """
         config = config_koch_follower.KochFollowerConfig(
             port=port,

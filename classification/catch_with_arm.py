@@ -21,9 +21,9 @@ def main():
         os.path.dirname(__file__), "object_detect", "runs", "best.pt"
     )
 
-    arm = Arm(port="COM3")
+    arm = Arm(port="/dev/ttyACM0")
     arm.move_to_home(gripper_angle_deg=80)
-    cam = Camera(color=True, depth=False)
+    cam = Camera(ip="192.168.189.1", color=True, depth=False)
     model = load_model(model_path)
     future = None
 
@@ -82,7 +82,7 @@ def main():
                         target_y + offset * np.sin(-gripper_angle_rad),
                         gripper_angle_rad,
                         [0.2, 0.0],
-                        0.075,
+                        0.07,
                     )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 
