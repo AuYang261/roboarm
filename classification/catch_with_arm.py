@@ -38,7 +38,10 @@ def main():
             if frame is None:
                 continue
 
-            detections = detect_objects_in_frame(model, frame, conf_thres=0.5)
+            if future is None or future.done():
+                detections = detect_objects_in_frame(model, frame, conf_thres=0.5)
+            else:
+                detections = detections
             if len(detections) == 0 and (future is None or future.done()):
                 # 移到旁边以免挡住视野
                 future = executor.submit(
