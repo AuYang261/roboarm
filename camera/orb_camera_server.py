@@ -2,15 +2,7 @@
 
 import cv2
 import numpy as np
-from pyorbbecsdk import (
-    Pipeline,
-    Config,
-    OBSensorType,
-    OBFrameType,
-    OBFormat,
-    OBError,
-    VideoStreamProfile,
-)
+from pyorbbecsdk import *
 from utils import frame_to_bgr_image
 import argparse
 import time, json, threading
@@ -47,7 +39,7 @@ def setup_camera():
                 config.enable_stream(sensor_type)
         except:
             continue
-
+        
     pipeline.start(config)
     return pipeline
 
@@ -59,6 +51,104 @@ def setup_imu():
     config.enable_gyro_stream()
     pipeline.start(config)
     return pipeline
+
+def hw_d2c_align_stream_config(pipeline: Pipeline):
+    """
+    Gets the stream configuration for the pipeline.
+
+    Args:
+        pipeline (Pipeline): The pipeline object.
+
+    Returns:
+        Config: The stream configuration.
+    """
+    config = Config()
+    try:
+        # Get the list of color stream profiles
+        profile_list = pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
+        assert profile_list is not None
+        
+        # Iterate through the color stream profiles
+        for i in range(len(profile_list)):
+            color_profile = profile_list[i]
+            
+            # Check if the color format is RGB
+            if color_profile.get_format() != OBFormat.RGB:
+                continue
+            
+            # Get the list of hardware aligned depth-to-color profiles
+            hw_d2c_profile_list = pipeline.get_d2c_depth_profile_list(color_profile, OBAlignMode.HW_MODE)
+            if len(hw_d2c_profile_list) == 0:
+                continue
+            
+            # Get the first hardware aligned depth-to-color profile
+            hw_d2c_profile = hw_d2c_profile_list[0]
+            print("hw_d2c_profile: ", hw_d2c_profile)
+            
+            # Enable the depth and color streams
+            config.enable_stream(hw_d2c_profile)
+            config.enable_stream(color_profile)
+            
+            # Set the alignment mode to hardware alignment
+            config.set_align_mode(OBAlignMode.HW_MODE)
+            return config
+    except Exception as e:
+        print(e)
+        return None
+    return None
+
+def process_d2c(color_frame, depth_frame, min_depth=20, max_depth=10000) -> dict:
+
+    if not color_frame or not depth_frame:
+        # print("process_d2c: missing color_frame or depth_frame")
+        return None
+    depth_format = depth_frame.get_format()
+    if depth_format != OBFormat.Y16:
+        print("depth format is not Y16")
+        return None
+
+    # Convert the color frame to a BGR image
+    color_image = frame_to_bgr_image(color_frame)
+    if color_image is None:
+        print("Failed to convert frame to image")
+        return None
+
+    # Get the depth data
+    depth_data = np.frombuffer(depth_frame.get_data(), dtype=np.uint16).reshape(
+        (depth_frame.get_height(), depth_frame.get_width()))
+    
+    # Convert depth data to float32 and apply depth scale
+    depth_data = depth_data.astype(np.float32) * depth_frame.get_depth_scale()
+    
+    # Apply custom depth range, clip depth data
+    depth_data = np.clip(depth_data, min_depth, max_depth)
+    
+    # Normalize depth data for display
+    depth_image = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX)
+    depth_image = cv2.applyColorMap(depth_image.astype(np.uint8), cv2.COLORMAP_JET)
+
+    return {"color": color_image, "depth": depth_image}
+
+def get_depth_data(depth_frame, min_depth=20, max_depth=10000):
+    if not depth_frame:
+        # print("process_d2c: missing color_frame or depth_frame")
+        return None
+    depth_format = depth_frame.get_format()
+    if depth_format != OBFormat.Y16:
+        print("depth format is not Y16")
+        return None
+
+    # Get the depth data
+    depth_data = np.frombuffer(depth_frame.get_data(), dtype=np.uint16).reshape(
+        (depth_frame.get_height(), depth_frame.get_width()))
+    
+    # Convert depth data to float32 and apply depth scale
+    depth_data = depth_data.astype(np.float32) * depth_frame.get_depth_scale()
+    
+    # Apply custom depth range, clip depth data
+    depth_data = np.clip(depth_data, min_depth, max_depth)
+    
+    return depth_data
 
 def process_color(frame):
     """Process color image"""
@@ -339,8 +429,8 @@ def start_rgb_server(host, port):
             except KeyboardInterrupt:
                 pass
         
-    @app.route('/video_feed_color')
-    def video_feed_color():
+    @app.route('/rgb_stream')
+    def rgb_stream():
         return Response(generate_frames(),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
     
@@ -401,6 +491,7 @@ def start_depth_server(host, port):
                 # Apply temporal filtering
                 depth_data = temporal_filter.process(depth_data)
 
+                # 计算中心点距离
                 center_y = int(height / 2)
                 center_x = int(width / 2)
                 center_distance = depth_data[center_y, center_x]
@@ -434,6 +525,7 @@ def start_depth_server(host, port):
 
 global_processed_frames = None
 global_ir_frame = None
+global_imu_data = None
 metadata_lock = threading.Lock()
 
 def frame_generator(pipeline, imu_pipeline):
@@ -469,6 +561,9 @@ def frame_generator(pipeline, imu_pipeline):
                 'accel': accel.as_accel_frame(),
                 'gyro': gyro.as_gyro_frame()
             }
+        
+        # 获取 点云 pointcloud
+        
 
         # 更新 共享数据
         with metadata_lock:
@@ -545,7 +640,6 @@ def start_usb_camera_server(host: str, port: int, camera_index: int):
 
     cap.release()
 
-
 def main():
     parser = argparse.ArgumentParser(description="ORB-NET Camera Server")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind the server")
@@ -565,6 +659,85 @@ def main():
         start_multi_server(args.host, args.port)
     elif args.mode == "usb":
         start_usb_camera_server(args.host, args.port, args.idx)
+
+def test_get_stream_config():
+    pipeline = setup_camera()
+
+    # Try to enable all possible sensors
+    video_sensors = [
+        OBSensorType.COLOR_SENSOR,
+        OBSensorType.DEPTH_SENSOR,
+        OBSensorType.IR_SENSOR,
+        OBSensorType.LEFT_IR_SENSOR,
+        OBSensorType.RIGHT_IR_SENSOR
+    ]
+
+    for sensor in video_sensors:
+        try:
+            profile_list = pipeline.get_stream_profile_list(sensor)
+            if profile_list is not None:
+                print(f"# sensor {sensor} profile list: ", profile_list)
+                video_profile = profile_list.get_default_video_stream_profile()
+                print(f"# sensor {sensor} default video profile: ", video_profile)
+                intrinsic = video_profile.get_intrinsic()
+                print(f"# sensor {sensor} intrinsics: ", intrinsic)
+        except Exception as e:
+            print(e)
+            continue
+    
+    # sensor OBSensorType.COLOR_SENSOR profile list:  <pyorbbecsdk.StreamProfileList object at 0x0000021818827E70>
+    # sensor OBSensorType.COLOR_SENSOR default video profile:  <VideoStreamProfile: 1280x720@15>
+    # sensor OBSensorType.COLOR_SENSOR intrinsics:  <OBCameraIntrinsic fx=845.414673 fy=845.256470 cx=638.501465 cy=359.652283 width=1280 height=720>
+    # sensor OBSensorType.DEPTH_SENSOR profile list:  <pyorbbecsdk.StreamProfileList object at 0x0000021817F736F0>
+    # sensor OBSensorType.DEPTH_SENSOR default video profile:  <VideoStreamProfile: 1280x800@15>
+    # sensor OBSensorType.DEPTH_SENSOR intrinsics:  <OBCameraIntrinsic fx=956.489136 fy=956.489136 cx=635.410156 cy=406.465637 width=1280 height=800>
+    # sensor OBSensorType.IR_SENSOR profile list:  <pyorbbecsdk.StreamProfileList object at 0x0000021817F61D30>
+    # sensor OBSensorType.IR_SENSOR default video profile:  <VideoStreamProfile: 1280x800@15>
+    # sensor OBSensorType.IR_SENSOR intrinsics:  <OBCameraIntrinsic fx=956.489136 fy=956.489136 cx=635.410156 cy=406.465637 width=1280 height=800>
+
+def test_hw_d2c_align():
+    pipeline = Pipeline()
+    config = hw_d2c_align_stream_config(pipeline)
+    pipeline.start(config)
+    
+    # 获取一帧的深度图像和彩色图像
+    while True:
+        # Get all frames
+        frames = pipeline.wait_for_frames(100)
+        if not frames:
+            continue
+        
+        color_frame = frames.get_color_frame()
+        depth_frame = frames.get_depth_frame()
+
+        res = process_d2c(color_frame, depth_frame)
+        if res is None:
+            # process_d2c prints reason; skip this iteration
+            continue
+
+        color_image = res.get("color")
+        depth_image = res.get("depth")
+
+        blended_image = cv2.addWeighted(color_image, 0.5, depth_image, 0.5, 0)
+        
+        cv2.namedWindow("HW D2C Align Viewer", cv2.WINDOW_NORMAL)
+
+        # Display the result
+        cv2.imshow("HW D2C Align Viewer", blended_image)
+        
+        if cv2.waitKey(1) in [ord('q'), 27]:  # 27 is the ESC key
+            break
+    
+    pipeline.stop()
+
+
+
+
+def test():
+    
+    # 手眼标定
+    
+    pass
 
 if __name__ == "__main__":
     main()
