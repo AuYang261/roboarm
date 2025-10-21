@@ -1,4 +1,4 @@
-# Description: 控制usb相机，获取图片用来构建数据集
+# Description: 控制相机获取图片用来构建数据集
 import cv2
 import os
 import sys
@@ -11,7 +11,7 @@ from camera.camera_api import Camera
 
 def main():
     print("Opening camera...")
-    cam = Camera(color=True, depth=False)
+    cam = Camera(ip="192.168.189.1", color=True, depth=False)
     dataset_path = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "dataset", "original"
     )

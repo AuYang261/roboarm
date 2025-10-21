@@ -2,9 +2,6 @@
 from collections.abc import Sequence
 import sys
 import os
-from unicodedata import digit
-from pygame import init
-from pynput import keyboard
 import time
 
 sys.path.append(
@@ -27,7 +24,7 @@ class Arm:
         hand_eye_calibration_file=os.path.join(
             os.path.dirname(__file__), "hand-eye-data/2d_homography.npy"
         ),
-        steps=10,
+        steps=20,
     ):
         """
         初始化机械臂
@@ -35,7 +32,7 @@ class Arm:
         calibration_dir: 标定文件夹路径，包含机械臂offset文件
         id: 机械臂型号，默认"koch_follower"
         hand_eye_calibration_file: 手眼标定文件路径，默认"hand-eye-data/2d_homography.npy"
-        steps: 机械臂插值移动步数，默认20，步数越多越平滑但越慢
+        steps: 机械臂插值移动步数，步数越多越平滑但越慢
         """
         config = config_koch_follower.KochFollowerConfig(
             port=port,
@@ -76,7 +73,12 @@ class Arm:
         if len(self.offset) != 5:
             raise ValueError("机械臂offset文件格式错误，应该有5个值")
         self.arm = koch_follower.KochFollower(config)
-        self.arm.connect()
+        try:
+            self.arm.connect()
+        except ConnectionError as e:
+            raise ConnectionError(
+                f"机械臂连接失败: {e}\n请检查端口号{port}是否正确，以及是否有777权限(sudo chmod 777 {port})"
+            ) from e
 
     def set_arm_angles(
         self,
@@ -99,7 +101,7 @@ class Arm:
         if len(action) > 0:
             current_angles_deg, current_gripper_deg = self.get_read_arm_angles()
             if current_angles_deg is None or current_gripper_deg is None:
-                self.arm.set_action(action)
+                self.arm.send_action(action)
                 return
             current_angles_deg.append(current_gripper_deg)
             # 对角度插值
@@ -115,7 +117,7 @@ class Arm:
                         else 0
                     )
                 self.arm.send_action(interp_action)
-                time.sleep(0.05)
+                time.sleep(0.5 / self.steps)
 
     def get_read_arm_angles(
         self,
@@ -290,7 +292,7 @@ class Arm:
 
 
 if __name__ == "__main__":
-    arm = Arm("COM3")
+    arm = Arm("/dev/ttyACM0")
     # arm.disable_torque()
     # while True:
     #     print(arm.get_read_arm_angles())

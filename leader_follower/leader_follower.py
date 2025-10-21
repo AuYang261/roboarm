@@ -1,7 +1,7 @@
 import sys
 import os
 
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "lerobot", "src"))
 from lerobot.motors.dynamixel import DynamixelMotorsBus
 from lerobot.motors import Motor, MotorCalibration, MotorNormMode
 import tqdm
@@ -10,7 +10,7 @@ import json
 import select
 
 leader_left_port = "COM5"
-follower_left_port = "COM6"
+follower_left_port = "/dev/ttyACM0"
 
 
 def main():
@@ -43,7 +43,7 @@ def main():
     # 确保连接成功
     leader_arm_left.connect()
     follower_arm_left.connect()
-    
+
     follower_arm_left.disable_torque()
 
     calibration_path_leader = r"calibration/koch_leader_arm_1.json"
@@ -79,17 +79,17 @@ def main():
 
             # 确保不会在过高频率下运行，可以加入一些延迟
             time.sleep(1 / frequency)
-            
+
             # 检测 控制台 是否输入 q 来退出
             if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
                 line = sys.stdin.readline()
                 if line.strip() == 'q':
                     print("Exiting...")
                     break
-            
+
         except Exception as e:
             pass
-    
+
     follower_arm_left.disable_torque()
     follower_arm_left.disconnect()
     leader_arm_left.disable_torque()
@@ -99,5 +99,3 @@ def main():
 if __name__ == "__main__":
     
     main()
-    
-    
