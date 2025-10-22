@@ -73,7 +73,12 @@ class Arm:
         if len(self.offset) != 5:
             raise ValueError("机械臂offset文件格式错误，应该有5个值")
         self.arm = koch_follower.KochFollower(config)
-        self.arm.connect()
+        try:
+            self.arm.connect()
+        except ConnectionError as e:
+            raise ConnectionError(
+                f"机械臂连接失败: {e}\n请检查端口号{port}是否正确，以及是否有777权限(sudo chmod 777 {port})"
+            ) from e
 
     def set_arm_angles(
         self,

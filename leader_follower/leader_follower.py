@@ -52,7 +52,7 @@ def main():
         calibration_data_leader[motor_name] = MotorCalibration(**calib)
     leader_arm_left.write_calibration(calibration_dict=calibration_data_leader)
 
-    calibration_path_follower = r"calibration/koch_follower_arm_1.json"
+    calibration_path_follower = r"calibration/koch_follower.json"
     calibration_data_follower = json.load(open(calibration_path_follower, "r"))
     for motor_name, calib in calibration_data_follower.items():
         calibration_data_follower[motor_name] = MotorCalibration(**calib)
