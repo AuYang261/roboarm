@@ -16,6 +16,8 @@ from sympy import im
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.orb_camera import open_camera, get_frames, close_camera
 from arm.arm_control import Arm
+
+
 import cv2
 import xlrd2, xlwt
 from math import cos, sin, pi
@@ -24,7 +26,6 @@ import kinpy
 from pynput import keyboard
 import time
 import threading
-
 
 def read_urdf(urdf_content: str) -> kinpy.chain.SerialChain:
     chain = kinpy.build_serial_chain_from_urdf(urdf_content, "gripper_static_1")
@@ -128,24 +129,46 @@ def calibrate_2d(
     return M
 
 
-def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
+def test_homography(chain: kinpy.chain.SerialChain, M, image_point, z=0.07):
+    
+    arm = Arm("COM6")
+    arm.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=None)
+    time.sleep(2)
+    
     """测试单应性矩阵"""
+    z = 0.1
     image_point_homogeneous = np.array([image_point[0], image_point[1], 1.0])
     robot_point_homogeneous = M @ image_point_homogeneous
     robot_point = robot_point_homogeneous[:2] / robot_point_homogeneous[2]
     angles_deg = np.rad2deg(
         chain.inverse_kinematics(
             kinpy.Transform(
-                pos=np.array([robot_point[0], robot_point[1], 0.1]), rot=[0, 0, 0]
+                pos=np.array([robot_point[0], robot_point[1], z]), rot=[0, 0, 0]
             )
         )
     )
     print(
         f"测试点 {image_point} 对应机械臂末端位置 {robot_point}, 逆解关节角度 {angles_deg}"
     )
-    arm = Arm("COM6")
     arm.set_arm_angles(angles_deg.tolist(), gripper_angle_deg=80)
     time.sleep(2)
+    
+    # 下降
+    z = 0.05
+    angles_deg = np.rad2deg(
+        chain.inverse_kinematics(
+            kinpy.Transform(
+                pos=np.array([robot_point[0], robot_point[1], z]), rot=[0, 0, 0]
+            )
+        )
+    )
+    print(
+        f"测试点 {image_point} 对应机械臂末端位置 {robot_point}, 逆解关节角度 {angles_deg}"
+    )
+    arm.set_arm_angles(angles_deg.tolist(), gripper_angle_deg=80)
+    time.sleep(2)
+    
+    # 归0
     arm.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=None)
     time.sleep(2)
     arm.disconnect_arm()
@@ -178,7 +201,8 @@ def main():
     )
 
     # 采集数据
-    collect_image_pose(image_points_path, angles_deg_list_path)
+    # collect_image_pose(image_points_path, angles_deg_list_path)
+    
     # 计算单应性矩阵
     homography_matrix = calibrate_2d(chain, image_points_path, angles_deg_list_path)
     np.save(
@@ -198,6 +222,65 @@ def main():
     for point in points:
         test_homography(chain, homography_matrix, point)
 
+def test_handeye_2d():
+    
+    # 获取chain
+    chain = read_urdf(
+        open(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "urdf",
+                "low_cost_robot.urdf",
+            )
+        ).read()
+    )
+
+    # 获取homography_matrix
+    homography_matrix_path = os.path.join(
+        os.path.dirname(__file__), "hand-eye-data", "2d_homography.npy"
+    )
+    homography_matrix = np.load(homography_matrix_path)
+    
+    # 回调函数：获取point并移动
+    def mouse_callback(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:  # 左键点击
+            print(f"Left button clicked at ({x}, {y})")
+            # 创建一个线程去执行移动函数
+            threading.Thread(target=test_homography, args=(chain, homography_matrix, (x, y))).start()
+
+    # 获取2d坐标 创建窗口并绑定鼠标回调函数
+    window_name = "Camera"
+    cv2.namedWindow(window_name)
+    cv2.setMouseCallback(window_name, mouse_callback)
+    
+    # 开启相机
+    cam = open_camera(color=True, depth=False)
+    while True:
+        try:
+            frames = get_frames(cam)
+            color_image = frames.get("color")
+            if color_image is None:
+                print("failed to get color image")
+                time.sleep(0.5)
+                continue
+            cv2.imshow(window_name, color_image)
+            
+            key = cv2.waitKey(1)
+            # esc退出
+            if key == 27:
+                break
+    
+        except KeyboardInterrupt:
+            break
+
+    cv2.destroyAllWindows()
+    close_camera(cam)
+    arm = Arm("COM6")
+    arm.disable_torque()
+    arm.disconnect_arm()
+    
+
 
 if __name__ == "__main__":
-    main()
+    test_handeye_2d()
