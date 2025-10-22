@@ -15,4 +15,6 @@ yolov11/
 
 *.txt
 
+cmd
+
 !docs/*
