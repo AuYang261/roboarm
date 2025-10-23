@@ -19,3 +19,9 @@ default_gripper_aside_pos:
   - 0.1
   - 0.0
   - 0.12
+
+# 执行时间(控制机械臂速度)
+default_gripper_speed : 3
+
+# 夹爪闭合阈值
+default_gripper_close_threshold : 3
