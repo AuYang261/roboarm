@@ -31,10 +31,10 @@ def on_press(key):
             POS[0] += 0.01
             print("Current position:", POS)
         elif key.char == "z" and POS[3] < 90:
-            POS[3] += 5
+            POS[3] += 0.1
             print("Current position:", POS)
         elif key.char == "c" and POS[3] > 0:
-            POS[3] -= 5
+            POS[3] -= 0.1
             print("Current position:", POS)
         elif key.char == "e":
             POS[4] = 0
@@ -68,7 +68,7 @@ def main():
     input_thread = threading.Thread(target=get_input)
     input_thread.daemon = True
     input_thread.start()
-    arm = Arm("COM3")
+    arm = Arm()
     POS[:3] = arm.move_to_home(gripper_angle_deg=80).pos  # type: ignore
     time.sleep(1)
     while True:
@@ -78,7 +78,7 @@ def main():
                 arm.disconnect_arm()
                 exit(0)
             arm.move_to(
-                POS[:3], gripper_angle_deg=POS[4], rot_deg=POS[3], warning=False
+                POS[:3], gripper_angle_deg=POS[4], rot_rad=POS[3], warning=False
             )
             time.sleep(0.1)
         except Exception as e:

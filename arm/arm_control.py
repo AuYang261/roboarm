@@ -18,7 +18,7 @@ class Arm:
 
     def __init__(
         self,
-        port,
+        port=None,
         calibration_dir=os.path.join(os.path.dirname(__file__), "..", "calibration"),
         id="koch_follower",
         hand_eye_calibration_file=os.path.join(
@@ -34,6 +34,15 @@ class Arm:
         hand_eye_calibration_file: 手眼标定文件路径，默认"hand-eye-data/2d_homography.npy"
         steps: 机械臂插值移动步数，步数越多越平滑但越慢
         """
+        if port is None:
+            port_file = os.path.join(calibration_dir, "port.txt")
+            if os.path.exists(port_file):
+                with open(port_file, "r") as f:
+                    port = f.read().strip()
+            else:
+                raise FileNotFoundError(
+                    f"找不到端口配置文件，请在 {port_file} 中指定端口号"
+                )
         config = config_koch_follower.KochFollowerConfig(
             port=port,
             disable_torque_on_disconnect=True,
@@ -292,10 +301,7 @@ class Arm:
 
 
 if __name__ == "__main__":
-    arm = Arm("COM3")
-    # arm.disable_torque()
-    # while True:
-    #     print(arm.get_read_arm_angles())
+    arm = Arm()
     time.sleep(1)
     arm.move_to_home(gripper_angle_deg=80)
     time.sleep(1)

@@ -31,7 +31,7 @@ def main():
         ),
     ]
 
-    arm = Arm(port="COM3")
+    arm = Arm()
     arm.move_to_home(gripper_angle_deg=80)
     cam = Camera(ip="127.0.0.1", color=True, depth=False)
     models = [load_model(model_path) for model_path in model_paths]

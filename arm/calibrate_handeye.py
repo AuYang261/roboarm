@@ -239,7 +239,7 @@ def collect_image_pose():
             )
         ).read()
     )
-    arm = Arm("COM3")
+    arm = Arm()
     arm.disable_torque()
     time.sleep(1)
     data = xlwt.Workbook()

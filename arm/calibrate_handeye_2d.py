@@ -50,7 +50,7 @@ def collect_image_pose(image_points_path, angles_deg_list_path):
     cv2.setMouseCallback(window_name, mouse_callback)
 
     angles_deg_list = []
-    arm = Arm("COM6")
+    arm = Arm()
     arm.disable_torque()
     cam = open_camera(color=True, depth=False)
     while True:
@@ -125,11 +125,11 @@ def calibrate_2d(
 
 
 def test_homography(chain: kinpy.chain.SerialChain, M, image_point, z=0.07):
-    
-    arm = Arm("COM6")
+
+    arm = Arm()
     arm.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=None)
     time.sleep(2)
-    
+
     """测试单应性矩阵"""
     z = 0.1
     image_point_homogeneous = np.array([image_point[0], image_point[1], 1.0])
@@ -147,7 +147,7 @@ def test_homography(chain: kinpy.chain.SerialChain, M, image_point, z=0.07):
     )
     arm.set_arm_angles(angles_deg.tolist(), gripper_angle_deg=80)
     time.sleep(2)
-    
+
     # 下降
     z = 0.05
     angles_deg = np.rad2deg(
@@ -162,7 +162,7 @@ def test_homography(chain: kinpy.chain.SerialChain, M, image_point, z=0.07):
     )
     arm.set_arm_angles(angles_deg.tolist(), gripper_angle_deg=80)
     time.sleep(2)
-    
+
     # 归0
     arm.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=None)
     time.sleep(2)
@@ -196,7 +196,7 @@ def main():
     )
 
     # 采集数据
-    # collect_image_pose(image_points_path, angles_deg_list_path)
+    collect_image_pose(image_points_path, angles_deg_list_path)
 
     # 计算单应性矩阵
     homography_matrix = calibrate_2d(chain, image_points_path, angles_deg_list_path)
@@ -254,7 +254,7 @@ def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
 
     cv2.destroyAllWindows()
     close_camera(cam)
-    arm = Arm("COM6")
+    arm = Arm()
     arm.disable_torque()
     arm.disconnect_arm()
 
