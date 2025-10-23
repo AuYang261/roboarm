@@ -6,6 +6,7 @@ arm_offset:
   - -50
   - 0
 
+# 不用远程摄像头则置空
 camera_ip: 127.0.0.1
 camera_port: 8083
 
