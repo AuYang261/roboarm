@@ -6,6 +6,12 @@ from arm.arm_control import Arm
 
 
 def main():
+    calibration_path = os.path.join(os.path.dirname(__file__), "..", "calibration")
+    if os.path.exists(os.path.join(calibration_path, "arm_offset.txt")):
+        os.rename(
+            os.path.join(calibration_path, "arm_offset.txt"),
+            os.path.join(calibration_path, "arm_offset_old.txt"),
+        )
     arm = Arm()
     arm.disable_torque()
     while True:
