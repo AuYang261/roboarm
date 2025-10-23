@@ -18,3 +18,5 @@ yolov11/
 cmd
 
 !docs/*
+
+config.ini
