@@ -12,6 +12,7 @@ os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.orb_camera import open_camera, get_frames, close_camera
 from arm.arm_control import Arm
+import yaml
 
 
 import argparse
@@ -150,7 +151,11 @@ def test_homography(chain: kinpy.chain.SerialChain, M, image_point, z=0.07):
     time.sleep(2)
 
     # 下降
-    z = 0.05
+    config_path: str = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)), "config.yaml"
+    )
+    config_yaml = yaml.safe_load(open(config_path, "r", encoding="utf-8"))
+    z = config_yaml.get("default_desktop_height", 0.075)
     angles_deg = np.rad2deg(
         chain.inverse_kinematics(
             kinpy.Transform(

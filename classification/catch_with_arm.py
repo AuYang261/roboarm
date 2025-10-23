@@ -33,8 +33,9 @@ def main():
     default_gripper_aside_pos = config_yaml.get(
         "default_gripper_aside_pos", [0.1, 0.0, 0.12]
     )
-    default_gripper_speed = config_yaml.get("default_gripper_speed", 5)
-    default_gripper_close_threshold = config_yaml.get("default_gripper_close_threshold", 3)
+    default_gripper_close_threshold = config_yaml.get(
+        "default_gripper_close_threshold", 3
+    )
 
     arm = Arm()
     arm.move_to_home(gripper_angle_deg=80)
@@ -42,7 +43,7 @@ def main():
     models = [load_model(model_path) for model_path in model_paths]
     detections = []
     future = None
-    
+
     err_cnt = 0
 
     while err_cnt < 100:
@@ -56,8 +57,7 @@ def main():
             if frame is None:
                 err_cnt += 1
                 continue
-            
-            
+
             if future is None or future.done():
                 detections = []
                 for model in models:
@@ -107,10 +107,7 @@ def main():
                         target_x + offset * np.cos(gripper_angle_rad),
                         target_y + offset * np.sin(-gripper_angle_rad),
                         gripper_angle_rad,
-                        [-0.2, 0.0], # 放置位置
-                        0.07,# height
-                        default_gripper_speed,  # 执行时间
-                        default_gripper_close_threshold,  # 夹爪闭合阈值
+                        [0.2, -0.08],
                     )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 

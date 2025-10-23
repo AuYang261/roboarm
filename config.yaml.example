@@ -15,14 +15,17 @@ YOLO_model_path:
   - classification\object_detect\runs\积木方块\best.pt
   - classification\object_detect\runs\积木螺丝国际象棋\best.pt
 
-# 机械臂移动到旁边的位置，以免挡住相机视野，(x,y,z)，单位: 米
+# 机械臂移动到旁边的位置，以免挡住相机视野，(x,y,z)，单位米
 default_gripper_aside_pos:
   - 0.1
   - 0.0
   - 0.12
 
-# 执行时间(控制机械臂速度)
-default_gripper_speed : 3
-
-# 夹爪闭合阈值
+# 夹爪闭合角度阈值，小于该值认为夹取失败，单位度
 default_gripper_close_threshold : 3
+
+# 默认桌面高度，即在机械臂坐标系下桌面的z坐标，单位米
+default_desktop_height: 0.075
+
+# 抓取动作间的停顿时间，单位秒
+catch_time_interval_s: 0.1

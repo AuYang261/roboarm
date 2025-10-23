@@ -1,5 +1,7 @@
 # Description: 机械臂控制封装
 from collections.abc import Sequence
+from math import inf
+from re import S
 import sys
 import os
 import time
@@ -43,15 +45,20 @@ class Arm:
             raise FileNotFoundError(
                 f"找不到配置文件，请按 {config_path}.example 创建配置文件{config_path}"
             )
-        config_yaml = yaml.safe_load(open(config_path, "r", encoding="utf-8"))
-        port = config_yaml.get("arm_port", None)
+        self.config_yaml = yaml.safe_load(open(config_path, "r", encoding="utf-8"))
+        self.desktop_height = self.config_yaml.get("default_desktop_height", 0.075)
+        self.default_gripper_close_threshold = self.config_yaml.get(
+            "default_gripper_close_threshold", 3
+        )
+        self.catch_time_interval_s = self.config_yaml.get("catch_time_interval_s", 0.1)
+        port = self.config_yaml.get("arm_port", None)
         if port is None:
             raise ValueError("配置文件中没有设置机械臂端口号 arm_port")
         self.steps = steps
         # 这个offset是用来修正机械臂零位的，目前不知道为什么舵机全零位置不是机械臂的零位
         # 所以每次重新标定或在新机械臂上需要重新测量这个offset
         # 方法见 arm/calibrate.py
-        self.offset = config_yaml.get("arm_offset", None)
+        self.offset = self.config_yaml.get("arm_offset", None)
         if self.offset is None or len(self.offset) != 5:
             raise ValueError(
                 "配置文件中没有正确设置机械臂offset arm_offset, 应该是5个关节的角度列表"
@@ -216,19 +223,18 @@ class Arm:
         target_y: float,
         rad: float,
         place_pos: list[float | int] = [0.2, 0.0],
-        height: float = 0.07,
-        time_interval_s: float = 0.5,
-        gripper_threshold_deg: float | int = 5,
+        height: float = inf,
     ):
         """
         机械臂抓取物体并放到指定位置
         target_x, target_y: 目标物体位置，单位米
         rad: 物体旋转角度，单位弧度
         place_pos: 放置位置，单位米，默认[0.2, 0.2]
-        height: 目标物体高度，单位米，默认0.07米
-        time_interval_s: 每个动作之间的时间间隔，单位秒，默认0.5秒
-        gripper_threshold_deg: 夹爪闭合角度阈值，单位度，默认5度，小于该值认为夹取失败
+        height: 目标物体高度，单位米，默认桌面高度
         """
+
+        if height == inf:
+            height = self.desktop_height
 
         # 移动机械臂到目标位置上方
         res = self.move_to(
@@ -241,7 +247,7 @@ class Arm:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_angle_deg=80)
             return
-        time.sleep(time_interval_s)
+        time.sleep(self.catch_time_interval_s)
 
         # 下降到目标位置
         res = self.move_to(
@@ -253,11 +259,11 @@ class Arm:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_angle_deg=80)
             return
-        time.sleep(time_interval_s)
+        time.sleep(self.catch_time_interval_s)
 
         # 夹紧物体
         self.set_arm_angles(gripper_angle_deg=0)
-        time.sleep(time_interval_s)
+        time.sleep(self.catch_time_interval_s)
 
         # 抬起物体
         res = self.move_to(
@@ -270,11 +276,11 @@ class Arm:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_angle_deg=80)
             return
-        time.sleep(time_interval_s)
+        time.sleep(self.catch_time_interval_s)
 
         # 确认夹紧成功
         angles, gripper = self.get_read_arm_angles()
-        if gripper is None or gripper < gripper_threshold_deg:
+        if gripper is None or gripper < self.default_gripper_close_threshold:
             print("夹取失败")
             self.move_to_home(gripper_angle_deg=80)
             return
@@ -287,23 +293,23 @@ class Arm:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_angle_deg=80)
             return
-        time.sleep(time_interval_s)
+        time.sleep(self.catch_time_interval_s)
         res = self.move_to(place_pos + [height], gripper_angle_deg=0)
         if res is None:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_angle_deg=80)
             return
-        time.sleep(time_interval_s)
+        time.sleep(self.catch_time_interval_s)
         self.set_arm_angles(gripper_angle_deg=80)
-        time.sleep(time_interval_s)
+        time.sleep(self.catch_time_interval_s)
         res = self.move_to(place_pos + [height + 0.1], warning=False)
         if res is None:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_angle_deg=80)
             return
-        time.sleep(time_interval_s)
+        time.sleep(self.catch_time_interval_s)
         self.move_to_home(gripper_angle_deg=80)
-        time.sleep(time_interval_s)
+        time.sleep(self.catch_time_interval_s)
 
 
 if __name__ == "__main__":
