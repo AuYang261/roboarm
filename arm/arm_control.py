@@ -12,14 +12,19 @@ from pathlib import Path
 from typing import Union, List
 import kinpy
 import numpy as np
+import yaml
 
 
 class Arm:
 
     def __init__(
         self,
-        port=None,
-        calibration_dir=os.path.join(os.path.dirname(__file__), "..", "calibration"),
+        config_path: str = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "config.yaml"
+        ),
+        calibration_dir=os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "calibration"
+        ),
         id="koch_follower",
         hand_eye_calibration_file=os.path.join(
             os.path.dirname(__file__), "hand-eye-data/2d_homography.npy"
@@ -34,36 +39,24 @@ class Arm:
         hand_eye_calibration_file: 手眼标定文件路径，默认"hand-eye-data/2d_homography.npy"
         steps: 机械臂插值移动步数，步数越多越平滑但越慢
         """
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(
+                f"找不到配置文件，请按 {config_path}.example 创建配置文件{config_path}"
+            )
+        config_yaml = yaml.safe_load(open(config_path, "r", encoding="utf-8"))
+        port = config_yaml.get("arm_port", None)
         if port is None:
-            port_file = os.path.join(calibration_dir, "port.txt")
-            if os.path.exists(port_file):
-                with open(port_file, "r") as f:
-                    port = f.read().strip()
-            else:
-                raise FileNotFoundError(
-                    f"找不到端口配置文件，请在 {port_file} 中指定端口号"
-                )
-        config = config_koch_follower.KochFollowerConfig(
-            port=port,
-            disable_torque_on_disconnect=True,
-            use_degrees=True,
-            id=id,
-            # calibration_dir=Path(calibration_dir).resolve(),
-        )
+            raise ValueError("配置文件中没有设置机械臂端口号 arm_port")
         self.steps = steps
         # 这个offset是用来修正机械臂零位的，目前不知道为什么舵机全零位置不是机械臂的零位
         # 所以每次重新标定或在新机械臂上需要重新测量这个offset
-        # 方法是标定完后，把机械臂放到零位位置(见docs/image1.png)，然后读取各关节角度，作为offset保存下来
-        # 一行一个，单位度，夹爪角度不需要
-        self.offset = [
-            float(x.strip())
-            for x in open(
-                os.path.join(calibration_dir, "arm_offset.txt"), "r", encoding="utf-8"
-            ).readlines()
-            if x.strip() != ""
-        ]
-        if len(self.offset) != 5:
-            raise ValueError("机械臂offset文件格式错误，应该有5个值")
+        # 方法见 arm/calibrate.py
+        self.offset = config_yaml.get("arm_offset", None)
+        if self.offset is None or len(self.offset) != 5:
+            raise ValueError(
+                "配置文件中没有正确设置机械臂offset arm_offset, 应该是5个关节的角度列表"
+                "运行arm/calibrate.py以获取arm_offset"
+            )
         if os.path.exists(hand_eye_calibration_file):
             self.hand_eye_calibration_matrix = np.load(hand_eye_calibration_file)
         with open(
@@ -81,12 +74,25 @@ class Arm:
             urdf_content, "gripper_static_1"
         )
 
-        self.arm = koch_follower.KochFollower(config)
+        self.arm = koch_follower.KochFollower(
+            config_koch_follower.KochFollowerConfig(
+                port=port,
+                disable_torque_on_disconnect=True,
+                use_degrees=True,
+                id=id,
+                calibration_dir=Path(calibration_dir).resolve(),
+            )
+        )
         try:
             self.arm.connect()
         except ConnectionError as e:
             raise ConnectionError(
-                f"机械臂连接失败: {e}\n请检查端口号{port}是否正确，以及是否有777权限(sudo chmod 777 {port})"
+                f"机械臂连接失败: {e}\n请检查端口号{port}是否正确"
+                + (
+                    "，以及是否有777权限(sudo chmod 777 {port})"
+                    if os.name != "nt"
+                    else ""
+                )
             ) from e
 
     def set_arm_angles(

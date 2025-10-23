@@ -1,0 +1,21 @@
+arm_port: COM3
+arm_offset:
+  - 0
+  - -30
+  - -40
+  - -50
+  - 0
+
+camera_ip: 127.0.0.1
+camera_port: 8083
+
+# 以项目根目录为基准
+YOLO_model_path:
+  - classification\object_detect\runs\积木方块\best.pt
+  - classification\object_detect\runs\积木螺丝国际象棋\best.pt
+
+# 机械臂移动到旁边的位置，以免挡住相机视野，(x,y,z)，单位: 米
+default_gripper_aside_pos:
+  - 0.1
+  - 0.0
+  - 0.12

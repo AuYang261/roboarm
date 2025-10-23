@@ -201,8 +201,6 @@ def start_usb_camera_client(host: str, port: int):
     cv2.namedWindow('Web Camera Client', cv2.WINDOW_NORMAL)
     print("Press 'q' to exit")
 
-
-
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -218,7 +216,7 @@ def start_usb_camera_client(host: str, port: int):
         cv2.putText(frame, f"FPS: {fps}, Resolution: {int(width)}x{int(height)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
         cv2.imshow('Web Camera Client', frame)
-        
+
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
@@ -227,15 +225,12 @@ def start_usb_camera_client(host: str, port: int):
 
 
 def main():
-    
-    # 读取 args 读取 host 和 port
-    # python web_camera_client.py --host 127.0.0.1 --port 8081
     parser = argparse.ArgumentParser(description="Web Camera Client")
     parser.add_argument("--host", type=str, default="localhost", help="Server host")
     parser.add_argument("--port", type=int, default=8083, help="Server port")
     parser.add_argument("--mode", type=str, default="multi", help="Video source (default: rgb)")
     args = parser.parse_args()
-    
+
     if args.mode == "none":
         pass
     elif args.mode == "dict":
@@ -248,6 +243,7 @@ def main():
         start_multi_client(args.host, args.port)
     elif args.mode == "usb":
         start_usb_camera_client(args.host, args.port)
+
 
 if __name__ == '__main__':
     main()

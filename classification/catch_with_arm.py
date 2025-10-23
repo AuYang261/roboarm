@@ -2,6 +2,8 @@
 import sys
 import os
 
+import yaml
+
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from arm.arm_control import Arm
 import numpy as np
@@ -18,23 +20,25 @@ import concurrent.futures
 
 def main():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    config_yaml = yaml.safe_load(
+        open(
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml"),
+            encoding="utf-8",
+        )
+    )
     model_paths = [
-        os.path.join(
-            os.path.dirname(__file__), "object_detect", "runs", "积木方块", "best.pt"
-        ),
-        os.path.join(
-            os.path.dirname(__file__),
-            "object_detect",
-            "runs",
-            "积木螺丝国际象棋",
-            "best.pt",
-        ),
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
+        for path in config_yaml.get("YOLO_model_path", [])
     ]
+    default_gripper_aside_pos = config_yaml.get(
+        "default_gripper_aside_pos", [0.1, 0.0, 0.12]
+    )
 
     arm = Arm()
     arm.move_to_home(gripper_angle_deg=80)
-    cam = Camera(ip="127.0.0.1", color=True, depth=False)
+    cam = Camera(color=True, depth=False)
     models = [load_model(model_path) for model_path in model_paths]
+    detections = []
     future = None
 
     while True:
@@ -53,13 +57,11 @@ def main():
                     detections.extend(
                         detect_objects_in_frame(model, frame, conf_thres=0.5)
                     )
-            else:
-                detections = detections
             if len(detections) == 0 and (future is None or future.done()):
                 # 移到旁边以免挡住视野
                 future = executor.submit(
                     arm.move_to,
-                    [0.1, 0.0, 0.12],
+                    default_gripper_aside_pos,
                     80,
                 )
             for (u, v, w, h, r), score, class_id, class_name in detections:

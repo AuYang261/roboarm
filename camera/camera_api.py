@@ -6,11 +6,24 @@ from camera import orb_camera
 from camera import orb_camera_client
 
 import cv2
-import argparse
+import yaml
 
 
 class Camera:
-    def __init__(self, ip: str = "", port: int = 8083, color: bool = True, depth: bool = False):
+
+    def __init__(
+        self,
+        ip: str = "",
+        port: int | None = None,
+        color: bool = True,
+        depth: bool = False,
+    ):
+        config = yaml.safe_load(
+            open(
+                os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml"),
+                encoding="utf-8",
+            )
+        )
         self.ip = ip
         self.port = port
         self.color = color
@@ -18,10 +31,18 @@ class Camera:
         self.pipeline = None
         self.cap_rgb = None
         self.cap_depth = None
-        if ip == "":
-            self.pipeline = orb_camera.open_camera(color, depth)
+        if self.ip == "":
+            self.ip = config.get("camera_ip", "")
+        if self.port is None:
+            self.port = config.get("camera_port", None)
+        if self.ip == "":
+            self.pipeline = orb_camera.open_camera(self.color, self.depth)
         else:
-            self.cap_rgb, self.cap_depth = orb_camera_client.open_orb_web_camera(ip, port, color, depth)
+            if self.port is None:
+                raise ValueError("未指定远程相机端口号")
+            self.cap_rgb, self.cap_depth = orb_camera_client.open_orb_web_camera(
+                self.ip, self.port, self.color, self.depth
+            )
 
     def get_frames(self) -> dict:
         if self.ip == "":
@@ -45,15 +66,13 @@ class Camera:
 
 def main():
 
-    camera = Camera(ip="127.0.0.1", port=8081, color=True, depth=False)
+    camera = Camera(color=True, depth=False)
 
     frame_rgb, frame_depth = camera.get_frames()
-    
+
     cv2.namedWindow('Camera Client', cv2.WINDOW_NORMAL)
     cv2.imshow('Camera Client', frame_rgb if frame_rgb is not None else frame_depth)
-    
-    
-    
+
     print("Press 'q' to exit")
     while True:
         key = cv2.waitKey(1)
