@@ -1,17 +1,13 @@
 # Description: 机械臂手眼标定2D版
 # 使用方法：准备一个显眼的点（如一个小球），用鼠标点击图片上该点的位置
-# 再将机械臂末端移动到该位置，按空格键记录机械臂末端位姿
+# 再将机械臂末端移动到该位置（要求夹爪static连杆垂直于桌面，即保证夹爪根部和末端xy坐标相同），按空格键记录机械臂末端位姿
 # 改变点的位置，重复4次以上，越多误差越小，按ESC键退出计算标定结果
 # 标定完成后会得到一个矩阵，表示相机坐标系（二维）到机械臂基座坐标系（z轴为桌面不变，故也是二维）的变换
 from collections.abc import Sequence
-import re
 import sys
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
-
-from matplotlib.transforms import Transform
-from sympy import im
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.orb_camera import open_camera, get_frames, close_camera
@@ -19,11 +15,8 @@ from arm.arm_control import Arm
 
 
 import cv2
-import xlrd2, xlwt
-from math import cos, sin, pi
 import numpy as np
 import kinpy
-from pynput import keyboard
 import time
 import threading
 
@@ -98,8 +91,10 @@ def calibrate_2d(
     angles_deg_list = np.load(angles_deg_list_path).astype(np.float32)  # Nx6
 
     assert (
-        image_points.shape[0] == angles_deg_list.shape[0] and image_points.shape[0] >= 4
-    )
+        image_points.shape[0] == angles_deg_list.shape[0]
+    ), "图片点和机械臂位姿数量不匹配"
+
+    assert image_points.shape[0] >= 4, "标定点数量不足，至少需要4个点"
 
     poses_list: list[kinpy.Transform] = []
     for angles_deg in angles_deg_list:
@@ -202,7 +197,7 @@ def main():
 
     # 采集数据
     # collect_image_pose(image_points_path, angles_deg_list_path)
-    
+
     # 计算单应性矩阵
     homography_matrix = calibrate_2d(chain, image_points_path, angles_deg_list_path)
     np.save(
@@ -221,27 +216,10 @@ def main():
     print(homography_matrix)
     for point in points:
         test_homography(chain, homography_matrix, point)
+    test_handeye_2d(chain, homography_matrix)
 
-def test_handeye_2d():
-    
-    # 获取chain
-    chain = read_urdf(
-        open(
-            os.path.join(
-                os.path.dirname(__file__),
-                "..",
-                "urdf",
-                "low_cost_robot.urdf",
-            )
-        ).read()
-    )
 
-    # 获取homography_matrix
-    homography_matrix_path = os.path.join(
-        os.path.dirname(__file__), "hand-eye-data", "2d_homography.npy"
-    )
-    homography_matrix = np.load(homography_matrix_path)
-    
+def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
     # 回调函数：获取point并移动
     def mouse_callback(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:  # 左键点击
@@ -253,7 +231,7 @@ def test_handeye_2d():
     window_name = "Camera"
     cv2.namedWindow(window_name)
     cv2.setMouseCallback(window_name, mouse_callback)
-    
+
     # 开启相机
     cam = open_camera(color=True, depth=False)
     while True:
@@ -265,12 +243,12 @@ def test_handeye_2d():
                 time.sleep(0.5)
                 continue
             cv2.imshow(window_name, color_image)
-            
+
             key = cv2.waitKey(1)
             # esc退出
             if key == 27:
                 break
-    
+
         except KeyboardInterrupt:
             break
 
@@ -279,8 +257,7 @@ def test_handeye_2d():
     arm = Arm("COM6")
     arm.disable_torque()
     arm.disconnect_arm()
-    
 
 
 if __name__ == "__main__":
-    test_handeye_2d()
+    main()

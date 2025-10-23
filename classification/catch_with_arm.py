@@ -18,14 +18,23 @@ import concurrent.futures
 
 def main():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    model_path = os.path.join(
-        os.path.dirname(__file__), "object_detect", "runs", "best.pt"
-    )
+    model_paths = [
+        os.path.join(
+            os.path.dirname(__file__), "object_detect", "runs", "积木方块", "best.pt"
+        ),
+        os.path.join(
+            os.path.dirname(__file__),
+            "object_detect",
+            "runs",
+            "积木螺丝国际象棋",
+            "best.pt",
+        ),
+    ]
 
-    arm = Arm(port="/dev/ttyACM0")
+    arm = Arm(port="COM3")
     arm.move_to_home(gripper_angle_deg=80)
-    cam = Camera(ip="192.168.189.1", color=True, depth=False)
-    model = load_model(model_path)
+    cam = Camera(ip="127.0.0.1", color=True, depth=False)
+    models = [load_model(model_path) for model_path in model_paths]
     future = None
 
     while True:
@@ -39,7 +48,11 @@ def main():
                 continue
 
             if future is None or future.done():
-                detections = detect_objects_in_frame(model, frame, conf_thres=0.5)
+                detections = []
+                for model in models:
+                    detections.extend(
+                        detect_objects_in_frame(model, frame, conf_thres=0.5)
+                    )
             else:
                 detections = detections
             if len(detections) == 0 and (future is None or future.done()):
@@ -85,8 +98,9 @@ def main():
                         target_x + offset * np.cos(gripper_angle_rad),
                         target_y + offset * np.sin(-gripper_angle_rad),
                         gripper_angle_rad,
-                        [0.2, 0.0],
-                        0.07,
+                        [0.2, -0.08],
+                        0.073,
+                        0.1,
                     )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 

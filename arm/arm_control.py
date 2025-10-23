@@ -39,7 +39,7 @@ class Arm:
             disable_torque_on_disconnect=True,
             use_degrees=True,
             id=id,
-            calibration_dir=Path(calibration_dir).resolve(),
+            # calibration_dir=Path(calibration_dir).resolve(),
         )
         self.steps = steps
         # 这个offset是用来修正机械臂零位的，目前不知道为什么舵机全零位置不是机械臂的零位
@@ -53,25 +53,25 @@ class Arm:
             ).readlines()
             if x.strip() != ""
         ]
-        if os.path.exists(hand_eye_calibration_file):
-            self.hand_eye_calibration_matrix = np.load(hand_eye_calibration_file)
-            with open(
-                os.path.join(
-                    os.path.dirname(__file__),
-                    "..",
-                    "urdf",
-                    "low_cost_robot.urdf",
-                ),
-                "r",
-                encoding="utf-8",
-            ) as f:
-                urdf_content = f.read()
-            self.chain = kinpy.build_serial_chain_from_urdf(
-                urdf_content, "gripper_static_1"
-            )
-
         if len(self.offset) != 5:
             raise ValueError("机械臂offset文件格式错误，应该有5个值")
+        if os.path.exists(hand_eye_calibration_file):
+            self.hand_eye_calibration_matrix = np.load(hand_eye_calibration_file)
+        with open(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "urdf",
+                "low_cost_robot.urdf",
+            ),
+            "r",
+            encoding="utf-8",
+        ) as f:
+            urdf_content = f.read()
+        self.chain = kinpy.build_serial_chain_from_urdf(
+            urdf_content, "gripper_static_1"
+        )
+
         self.arm = koch_follower.KochFollower(config)
         try:
             self.arm.connect()
@@ -200,7 +200,7 @@ class Arm:
         target_x: float,
         target_y: float,
         rad: float,
-        place_pos: list[float | int] = [0.2, 0.2],
+        place_pos: list[float | int] = [0.2, 0.0],
         height: float = 0.07,
         time_interval_s: float = 0.5,
         gripper_threshold_deg: float | int = 5,
@@ -292,7 +292,7 @@ class Arm:
 
 
 if __name__ == "__main__":
-    arm = Arm("/dev/ttyACM0")
+    arm = Arm("COM3")
     # arm.disable_torque()
     # while True:
     #     print(arm.get_read_arm_angles())

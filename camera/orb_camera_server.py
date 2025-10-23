@@ -10,7 +10,8 @@ from pyorbbecsdk import (
     Context,
     OBFormat,
     OBError,
-    OBAlignMode
+    OBAlignMode,
+    OBFrameType,
 )
 
 from utils import frame_to_bgr_image
@@ -665,7 +666,9 @@ def start_usb_camera_server(host: str, port: int, camera_index: int):
 def main():
     parser = argparse.ArgumentParser(description="ORB-NET Camera Server")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind the server")
-    parser.add_argument("--port", type=int, default=8081, help="Port to bind the server")
+    parser.add_argument(
+        "--port", type=int, default=8083, help="Port to bind the server"
+    )
     parser.add_argument("--idx", type=int, default=4, help="camera index")
     parser.add_argument("--mode", type=str, default="multi", help="Video source (default: rgb)")
     args = parser.parse_args()
@@ -682,84 +685,6 @@ def main():
     elif args.mode == "usb":
         start_usb_camera_server(args.host, args.port, args.idx)
 
-def test_get_stream_config():
-    pipeline = setup_camera()
-
-    # Try to enable all possible sensors
-    video_sensors = [
-        OBSensorType.COLOR_SENSOR,
-        OBSensorType.DEPTH_SENSOR,
-        OBSensorType.IR_SENSOR,
-        OBSensorType.LEFT_IR_SENSOR,
-        OBSensorType.RIGHT_IR_SENSOR
-    ]
-
-    for sensor in video_sensors:
-        try:
-            profile_list = pipeline.get_stream_profile_list(sensor)
-            if profile_list is not None:
-                print(f"# sensor {sensor} profile list: ", profile_list)
-                video_profile = profile_list.get_default_video_stream_profile()
-                print(f"# sensor {sensor} default video profile: ", video_profile)
-                intrinsic = video_profile.get_intrinsic()
-                print(f"# sensor {sensor} intrinsics: ", intrinsic)
-        except Exception as e:
-            print(e)
-            continue
-    
-    # sensor OBSensorType.COLOR_SENSOR profile list:  <pyorbbecsdk.StreamProfileList object at 0x0000021818827E70>
-    # sensor OBSensorType.COLOR_SENSOR default video profile:  <VideoStreamProfile: 1280x720@15>
-    # sensor OBSensorType.COLOR_SENSOR intrinsics:  <OBCameraIntrinsic fx=845.414673 fy=845.256470 cx=638.501465 cy=359.652283 width=1280 height=720>
-    # sensor OBSensorType.DEPTH_SENSOR profile list:  <pyorbbecsdk.StreamProfileList object at 0x0000021817F736F0>
-    # sensor OBSensorType.DEPTH_SENSOR default video profile:  <VideoStreamProfile: 1280x800@15>
-    # sensor OBSensorType.DEPTH_SENSOR intrinsics:  <OBCameraIntrinsic fx=956.489136 fy=956.489136 cx=635.410156 cy=406.465637 width=1280 height=800>
-    # sensor OBSensorType.IR_SENSOR profile list:  <pyorbbecsdk.StreamProfileList object at 0x0000021817F61D30>
-    # sensor OBSensorType.IR_SENSOR default video profile:  <VideoStreamProfile: 1280x800@15>
-    # sensor OBSensorType.IR_SENSOR intrinsics:  <OBCameraIntrinsic fx=956.489136 fy=956.489136 cx=635.410156 cy=406.465637 width=1280 height=800>
-
-def test_hw_d2c_align():
-    pipeline = Pipeline()
-    config = hw_d2c_align_stream_config(pipeline)
-    pipeline.start(config)
-    
-    # 获取一帧的深度图像和彩色图像
-    while True:
-        # Get all frames
-        frames = pipeline.wait_for_frames(100)
-        if not frames:
-            continue
-        
-        color_frame = frames.get_color_frame()
-        depth_frame = frames.get_depth_frame()
-
-        res = process_d2c(color_frame, depth_frame)
-        if res is None:
-            # process_d2c prints reason; skip this iteration
-            continue
-
-        color_image = res.get("color")
-        depth_image = res.get("depth")
-
-        blended_image = cv2.addWeighted(color_image, 0.5, depth_image, 0.5, 0)
-        
-        cv2.namedWindow("HW D2C Align Viewer", cv2.WINDOW_NORMAL)
-
-        # Display the result
-        cv2.imshow("HW D2C Align Viewer", blended_image)
-        
-        if cv2.waitKey(1) in [ord('q'), 27]:  # 27 is the ESC key
-            break
-    
-    pipeline.stop()
-
-
-
-
-def test():
-    
-    # 手眼标定
-    
-    pass
 
 if __name__ == "__main__":
     main()
