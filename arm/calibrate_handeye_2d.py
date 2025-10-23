@@ -14,6 +14,7 @@ from camera.orb_camera import open_camera, get_frames, close_camera
 from arm.arm_control import Arm
 
 
+import argparse
 import cv2
 import numpy as np
 import kinpy
@@ -170,6 +171,11 @@ def test_homography(chain: kinpy.chain.SerialChain, M, image_point, z=0.07):
 
 
 def main():
+    argparser = argparse.ArgumentParser(description="机械臂手眼标定2D版")
+    argparser.add_argument("--mode", type=str, default="calibrate", help="模式")
+    args = argparser.parse_args()
+    
+    
     image_points_path = os.path.join(
         os.path.dirname(__file__), "hand-eye-data", "2d_image_points.npy"
     )
@@ -195,28 +201,30 @@ def main():
         ).read()
     )
 
-    # 采集数据
-    collect_image_pose(image_points_path, angles_deg_list_path)
+    if args.mode == "calibrate":
+        # 采集数据
+        collect_image_pose(image_points_path, angles_deg_list_path)
+        # 计算单应性矩阵
+        homography_matrix = calibrate_2d(chain, image_points_path, angles_deg_list_path)
+        np.save(
+            homography_matrix_path,
+            homography_matrix,
+        )
 
-    # 计算单应性矩阵
-    homography_matrix = calibrate_2d(chain, image_points_path, angles_deg_list_path)
-    np.save(
-        homography_matrix_path,
-        homography_matrix,
-    )
-
-    angles_deg_list = np.load(angles_deg_list_path).astype(np.float32)  # Nx6
-    print("机械臂角度:")
-    print(angles_deg_list)
-    points = np.load(image_points_path).astype(np.float32)  # Nx2
-    print("图片上点的像素坐标:")
-    print(points)
-    homography_matrix = np.load(homography_matrix_path)
-    print("计算得到的单应性矩阵:")
-    print(homography_matrix)
-    for point in points:
-        test_homography(chain, homography_matrix, point)
-    test_handeye_2d(chain, homography_matrix)
+        angles_deg_list = np.load(angles_deg_list_path).astype(np.float32)  # Nx6
+        print("机械臂角度:")
+        print(angles_deg_list)
+        points = np.load(image_points_path).astype(np.float32)  # Nx2
+        print("图片上点的像素坐标:")
+        print(points)
+        homography_matrix = np.load(homography_matrix_path)
+        print("计算得到的单应性矩阵:")
+        print(homography_matrix)
+        for point in points:
+            test_homography(chain, homography_matrix, point)
+    elif args.mode == "test":
+        homography_matrix = np.load(homography_matrix_path)
+        test_handeye_2d(chain, homography_matrix)
 
 
 def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
