@@ -8,12 +8,43 @@ import tqdm
 import time
 import json
 import select
-
-leader_left_port = "COM5"
-follower_left_port = "/dev/ttyACM0"
+import argparse
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Leader-Follower Control")
+    parser.add_argument(
+        "--leader_left_port",
+        type=str,
+        default="COM5",
+        help="Serial port for the leader left arm",
+    )
+    parser.add_argument(
+        "--follower_left_port",
+        type=str,
+        default="COM6",
+        help="Serial port for the follower left arm",
+    )
+    parser.add_argument(
+        "--calibration_left_path",
+        type=str,
+        default="calibration/koch_follower.json",
+        help="Path to the follower left arm calibration file",
+    )
+    parser.add_argument(
+        "--follower_left_path",
+        type=str,
+        default="calibration/koch_follower.json",
+        help="Path to the follower left arm calibration file",
+    )
+    args = parser.parse_args()
+    
+    leader_left_port = args.leader_left_port
+    follower_left_port = args.follower_left_port
+    
+    leader_arm_path = args.calibration_left_path
+    follower_arm_path = args.follower_left_path
+    
 
     norm_mode_body = MotorNormMode.DEGREES
     leader_arm_left = DynamixelMotorsBus(
@@ -46,13 +77,13 @@ def main():
 
     follower_arm_left.disable_torque()
 
-    calibration_path_leader = r"calibration/koch_leader_arm_1.json"
+    calibration_path_leader = leader_arm_path
     calibration_data_leader = json.load(open(calibration_path_leader, "r"))
     for motor_name, calib in calibration_data_leader.items():
         calibration_data_leader[motor_name] = MotorCalibration(**calib)
     leader_arm_left.write_calibration(calibration_dict=calibration_data_leader)
 
-    calibration_path_follower = r"calibration/koch_follower.json"
+    calibration_path_follower = follower_arm_path
     calibration_data_follower = json.load(open(calibration_path_follower, "r"))
     for motor_name, calib in calibration_data_follower.items():
         calibration_data_follower[motor_name] = MotorCalibration(**calib)

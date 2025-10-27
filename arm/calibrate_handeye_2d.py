@@ -225,8 +225,8 @@ def main():
         homography_matrix = np.load(homography_matrix_path)
         print("计算得到的单应性矩阵:")
         print(homography_matrix)
-        for point in points:
-            test_homography(chain, homography_matrix, point)
+        # for point in points:
+        #     test_homography(chain, homography_matrix, point)
     elif args.mode == "test":
         homography_matrix = np.load(homography_matrix_path)
         test_handeye_2d(chain, homography_matrix)

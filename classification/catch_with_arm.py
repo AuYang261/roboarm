@@ -112,7 +112,10 @@ def main():
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 
             end_time = time.time()
-            fps = 1 / (end_time - start_time)
+            if end_time - start_time == 0:
+                fps = 0.0
+            else:
+                fps = 1 / (end_time - start_time)
             cv2.putText(
                 frame,
                 f"FPS: {fps:.2f}",
