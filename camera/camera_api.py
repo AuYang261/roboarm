@@ -35,7 +35,7 @@ class Camera:
             self.ip = config.get("camera_ip", "")
         if self.port is None:
             self.port = config.get("camera_port", None)
-        if self.ip == "":
+        if not self.ip:
             self.pipeline = orb_camera.open_camera(self.color, self.depth)
         else:
             if self.port is None:

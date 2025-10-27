@@ -173,6 +173,7 @@ class Arm:
         机械臂回到初始位置
         """
         self.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=gripper_angle_deg)
+        return self.chain.forward_kinematics(np.deg2rad([0, 0, 0, 0, 0]).tolist())
 
     def move_to(
         self,
