@@ -28,14 +28,12 @@ def main():
     )
     model_paths = [
         os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
-        for path in config_yaml.get("YOLO_model_path", [])
+        for path in config_yaml.get("classification_YOLO_model_path", [])
     ]
     default_gripper_aside_pos = config_yaml.get(
         "default_gripper_aside_pos", [0.1, 0.0, 0.12]
     )
-    default_gripper_close_threshold = config_yaml.get(
-        "default_gripper_close_threshold", 3
-    )
+    class_pos = config_yaml.get("class_pos", {})
 
     arm = Arm()
     arm.move_to_home(gripper_angle_deg=80)
@@ -107,7 +105,7 @@ def main():
                         target_x + offset * np.cos(gripper_angle_rad),
                         target_y + offset * np.sin(-gripper_angle_rad),
                         gripper_angle_rad,
-                        [0.2, -0.08],
+                        class_pos.get(class_name, [-0.2, 0.0]),
                     )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 

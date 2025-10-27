@@ -10,8 +10,16 @@ arm_offset:
 camera_ip: 127.0.0.1
 camera_port: 8083
 
+# 默认桌面高度，即在机械臂坐标系下桌面的z坐标，单位米
+default_desktop_height: 0.075
+
+# 抓取动作间的停顿时间，单位秒
+catch_time_interval_s: 0.1
+
+# =======物品分类场景=======
+
 # 以项目根目录为基准
-YOLO_model_path:
+classification_YOLO_model_path:
   - classification\object_detect\runs\积木方块\best.pt
   - classification\object_detect\runs\积木螺丝国际象棋\best.pt
 
@@ -22,10 +30,13 @@ default_gripper_aside_pos:
   - 0.12
 
 # 夹爪闭合角度阈值，小于该值认为夹取失败，单位度
-default_gripper_close_threshold : 3
+default_gripper_close_threshold: 3
 
-# 默认桌面高度，即在机械臂坐标系下桌面的z坐标，单位米
-default_desktop_height: 0.075
-
-# 抓取动作间的停顿时间，单位秒
-catch_time_interval_s: 0.1
+# 各类别放置位置
+class_pos:
+  blue_block:
+    - 0.2
+    - 0
+  white_block:
+    - -0.2
+    - 0

@@ -10,7 +10,7 @@ os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from camera.orb_camera import open_camera, get_frames, close_camera
+from camera.camera_api import Camera
 from arm.arm_control import Arm
 import yaml
 
@@ -54,7 +54,7 @@ def collect_image_pose(image_points_path, angles_deg_list_path):
     angles_deg_list = []
     arm = Arm()
     arm.disable_torque()
-    cam = open_camera(color=True, depth=False)
+    cam = Camera(color=True, depth=False)
     while True:
         try:
             angles_deg, gripper = arm.get_read_arm_angles()
@@ -62,7 +62,7 @@ def collect_image_pose(image_points_path, angles_deg_list_path):
                 print("获取机械臂角度失败")
                 continue
 
-            frames = get_frames(cam)
+            frames = cam.get_frames()
             color_image = frames.get("color")
             if color_image is None:
                 print("failed to get color image")
@@ -77,7 +77,7 @@ def collect_image_pose(image_points_path, angles_deg_list_path):
         except KeyboardInterrupt:
             break
     cv2.destroyAllWindows()
-    close_camera(cam)
+    cam.close()
     arm.disconnect_arm()
 
     np.save(image_points_path, np.array(POINTS))
@@ -246,10 +246,10 @@ def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
     cv2.setMouseCallback(window_name, mouse_callback)
 
     # 开启相机
-    cam = open_camera(color=True, depth=False)
+    cam = Camera(color=True, depth=False)
     while True:
         try:
-            frames = get_frames(cam)
+            frames = cam.get_frames()
             color_image = frames.get("color")
             if color_image is None:
                 print("failed to get color image")
@@ -266,7 +266,7 @@ def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
             break
 
     cv2.destroyAllWindows()
-    close_camera(cam)
+    cam.close()
     arm = Arm()
     arm.disable_torque()
     arm.disconnect_arm()
