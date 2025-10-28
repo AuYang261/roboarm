@@ -1,4 +1,4 @@
-leader_port: COM5
+
 arm_port: COM3
 arm_offset:
   - 0
@@ -44,3 +44,7 @@ class_pos:
   white_block:
     - -0.2
     - 0
+
+# =======主从臂跟随场景=======
+
+leader_port: COM5
