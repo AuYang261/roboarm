@@ -9,16 +9,17 @@ from arm.arm_control import Arm
 
 
 def main():
-    calibration_path = os.path.join(os.path.dirname(__file__), "..", "calibration")
-    if os.path.exists(os.path.join(calibration_path, "arm_offset.txt")):
-        with open(os.path.join(calibration_path, "arm_offset.txt"), "w") as f:
-            for i in range(5):
-                f.write("0\n")
     arm = Arm()
     arm.disable_torque()
     while True:
-        print(arm.get_read_arm_angles())
+        print("=" * 10)
+        try:
+            for angle_deg in list(arm.arm.get_observation().values())[:-1]:
+                print(f"  - {angle_deg:.2f}")
+        except Exception as e:
+            pass
     arm.disconnect_arm()
+
 
 if __name__ == "__main__":
     main()
