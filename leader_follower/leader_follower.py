@@ -9,22 +9,10 @@ import time
 import json
 import select
 import argparse
-
+import yaml
 
 def main():
     parser = argparse.ArgumentParser(description="Leader-Follower Control")
-    parser.add_argument(
-        "--leader_left_port",
-        type=str,
-        default="COM5",
-        help="Serial port for the leader left arm",
-    )
-    parser.add_argument(
-        "--follower_left_port",
-        type=str,
-        default="COM6",
-        help="Serial port for the follower left arm",
-    )
     parser.add_argument(
         "--calibration_left_path",
         type=str,
@@ -39,9 +27,16 @@ def main():
     )
     args = parser.parse_args()
     
-    leader_left_port = args.leader_left_port
-    follower_left_port = args.follower_left_port
-    
+    # 从 config.yaml 读取端口信息
+    config = None
+    with open("config.yaml", "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+    if config is None:
+        print("Failed to load config.yaml")
+        return
+    leader_left_port = config.get("leader_port", "COM1")
+    follower_left_port = config.get("arm_port", "COM2")
+
     leader_arm_path = args.calibration_left_path
     follower_arm_path = args.follower_left_path
     

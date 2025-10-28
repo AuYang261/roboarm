@@ -1,3 +1,4 @@
+leader_port: COM5
 arm_port: COM3
 arm_offset:
   - 0
