@@ -223,14 +223,12 @@ class Arm:
         target_x: float,
         target_y: float,
         rad: float,
-        place_pos: list[float | int] = [0.2, 0.0],
         height: float = inf,
     ):
         """
         机械臂抓取物体并放到指定位置
         target_x, target_y: 目标物体位置，单位米
         rad: 物体旋转角度，单位弧度
-        place_pos: 放置位置，单位米，默认[0.2, 0.2]
         height: 目标物体高度，单位米，默认桌面高度
         """
 
@@ -239,7 +237,7 @@ class Arm:
 
         # 移动机械臂到目标位置上方
         res = self.move_to(
-            [target_x, target_y, height + 0.05],
+            [target_x, target_y, height + 0.1],
             gripper_angle_deg=80,
             rot_rad=rad,
             warning=False,
@@ -247,7 +245,7 @@ class Arm:
         if res is None:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_angle_deg=80)
-            return
+            return False
         time.sleep(self.catch_time_interval_s)
 
         # 下降到目标位置
@@ -259,7 +257,7 @@ class Arm:
         if res is None:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_angle_deg=80)
-            return
+            return False
         time.sleep(self.catch_time_interval_s)
 
         # 夹紧物体
@@ -268,7 +266,7 @@ class Arm:
 
         # 抬起物体
         res = self.move_to(
-            [target_x, target_y, height + 0.05],
+            [target_x, target_y, height + 0.1],
             gripper_angle_deg=0,
             rot_rad=rad,
             warning=False,
@@ -276,7 +274,7 @@ class Arm:
         if res is None:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_angle_deg=80)
-            return
+            return False
         time.sleep(self.catch_time_interval_s)
 
         # 确认夹紧成功
@@ -284,33 +282,97 @@ class Arm:
         if gripper is None or gripper < self.default_gripper_close_threshold:
             print("夹取失败")
             self.move_to_home(gripper_angle_deg=80)
-            return
+            return False
+        time.sleep(self.catch_time_interval_s)
+        return True
 
-        # 放到指定位置
+    def place(
+        self,
+        target_x: float,
+        target_y: float,
+        target_z: float,
+        rad: float,
+    ):
+        """
+        机械臂放置物体到指定位置
+        target_x, target_y, target_z: 目标位置，单位米
+        rad: 物体旋转角度，单位弧度
+        """
+
+        # 移动机械臂到目标位置上方
         res = self.move_to(
-            place_pos + [height + 0.1], gripper_angle_deg=0, warning=False
+            [target_x, target_y, target_z + 0.1],
+            gripper_angle_deg=0,
+            rot_rad=rad,
+            warning=False,
         )
         if res is None:
-            print("移动到目标位置失败，取消抓取")
+            print("移动到目标位置失败，取消放置")
             self.move_to_home(gripper_angle_deg=80)
-            return
+            return False
         time.sleep(self.catch_time_interval_s)
-        res = self.move_to(place_pos + [height], gripper_angle_deg=0)
+
+        # 下降到目标位置
+        res = self.move_to(
+            [target_x, target_y, target_z],
+            gripper_angle_deg=0,
+            rot_rad=rad,
+        )
         if res is None:
-            print("移动到目标位置失败，取消抓取")
+            print("移动到目标位置失败，取消放置")
             self.move_to_home(gripper_angle_deg=80)
-            return
+            return False
         time.sleep(self.catch_time_interval_s)
+
+        # 放开物体
         self.set_arm_angles(gripper_angle_deg=80)
         time.sleep(self.catch_time_interval_s)
-        res = self.move_to(place_pos + [height + 0.1], warning=False)
+
+        # 抬起机械臂
+        res = self.move_to(
+            [target_x, target_y, target_z + 0.1],
+            gripper_angle_deg=80,
+            rot_rad=rad,
+            warning=False,
+        )
         if res is None:
-            print("移动到目标位置失败，取消抓取")
+            print("移动到目标位置失败，取消放置")
             self.move_to_home(gripper_angle_deg=80)
-            return
+            return False
         time.sleep(self.catch_time_interval_s)
+        return True
+
+    def catch_and_place(
+        self,
+        target_x: float,
+        target_y: float,
+        rad: float,
+        place_pos: list[float | int] = [0.2, 0.0],
+        height: float = inf,
+    ):
+        """
+        机械臂抓取物体并放到初始位置
+        target_x, target_y: 目标物体位置，单位米
+        rad: 物体旋转角度，单位弧度
+        place_pos: 放置位置[x, y]或[x, y, z]，单位米，默认[0.2, 0.0, 桌面高度]
+        height: 目标物体高度，单位米，默认桌面高度
+        """
+        if len(place_pos) == 2:
+            place_x, place_y = place_pos
+            place_z = self.desktop_height
+        elif len(place_pos) == 3:
+            place_x, place_y, place_z = place_pos
+        else:
+            print("放置位置格式错误，应该是[x, y]或[x, y, z]")
+            return False
+        if not self.catch(target_x, target_y, rad, height=height):
+            self.move_to_home(gripper_angle_deg=80)
+            return False
+        if not self.place(place_x, place_y, place_z, rad):
+            self.move_to_home(gripper_angle_deg=80)
+            return False
         self.move_to_home(gripper_angle_deg=80)
-        time.sleep(self.catch_time_interval_s)
+        return True
 
 
 if __name__ == "__main__":

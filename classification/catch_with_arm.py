@@ -104,7 +104,7 @@ def main():
                     # 夹爪向外偏移一些，避免刚好顶到物体
                     offset = 0.00
                     future = executor.submit(
-                        arm.catch,
+                        arm.catch_and_place,
                         target_x + offset * np.cos(gripper_angle_rad),
                         target_y + offset * np.sin(-gripper_angle_rad),
                         gripper_angle_rad,
