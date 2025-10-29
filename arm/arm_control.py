@@ -6,6 +6,8 @@ import sys
 import os
 import time
 
+from flask.cli import F
+
 sys.path.append(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "lerobot/src/")
 )
@@ -123,11 +125,10 @@ class Arm:
         if len(action) > 0:
             current_angles_deg, current_gripper_deg = self.get_read_arm_angles()
             if current_angles_deg is None or current_gripper_deg is None:
-                self.arm.send_action(action)
-                return
+                return False
             current_angles_deg.append(current_gripper_deg)
             # 对角度插值
-            for alpha in np.linspace(0, 1, self.steps):
+            for alpha in np.linspace(0, 1, self.steps + 1)[1:]:
                 interp_action = {}
                 for key, value in action.items():
                     motor_index = motor_names.index(key.removesuffix(".pos"))
@@ -140,9 +141,10 @@ class Arm:
                     )
                 self.arm.send_action(interp_action)
                 time.sleep(0.5 / self.steps)
+        return True
 
     def get_read_arm_angles(
-        self,
+        self, retry_times: int = 3
     ) -> tuple[Union[List[float], None], Union[float, None]]:
         """
         获取机械臂各关节角度和夹爪状态，单位度
@@ -150,6 +152,9 @@ class Arm:
         try:
             angles_deg = list(self.arm.get_observation().values())
         except Exception as e:
+            if retry_times > 0:
+                time.sleep(self.catch_time_interval_s)
+                return self.get_read_arm_angles(retry_times - 1)
             return None, None
         return [
             angle - offset
@@ -200,7 +205,8 @@ class Arm:
             pos=np.array(pos), rot=[0, 0, -rot_rad if rot_rad else 0]
         )
         angles_deg = np.rad2deg(self.chain.inverse_kinematics(goal_tf)).tolist()
-        self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg)
+        if not self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg):
+            return None
         return self.get_read_arm_angles()
 
     def pixel2pos(self, u: float, v: float):

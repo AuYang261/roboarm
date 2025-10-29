@@ -35,6 +35,7 @@ def main():
     )
     default_conf_thres = config_yaml.get("default_conf_thres", 0.8)
     class_pos = config_yaml.get("class_pos", {})
+    offset = config_yaml.get("catch_offset", 0.01)
 
     arm = Arm()
     arm.move_to_home(gripper_angle_deg=80)
@@ -101,10 +102,9 @@ def main():
                     if gripper_angle_rad > np.pi / 2:
                         gripper_angle_rad -= np.pi
 
-                    # 夹爪向外偏移一些，避免刚好顶到物体
-                    offset = 0.00
                     future = executor.submit(
                         arm.catch_and_place,
+                        # 夹爪向外偏移一些，避免刚好顶到物体
                         target_x + offset * np.cos(gripper_angle_rad),
                         target_y + offset * np.sin(-gripper_angle_rad),
                         gripper_angle_rad,
