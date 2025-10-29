@@ -1,14 +1,13 @@
-import imp
+import yaml
 from ultralytics import YOLO
 import cv2
 import numpy as np
 import time
 import os
-import argparse
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from camera.orb_camera import open_camera, get_frames, close_camera
+from camera.camera_api import Camera
 
 
 def detect_objects_in_frame(model, frame, conf_thres=0.8, iou_thres=0.45):
@@ -48,38 +47,29 @@ def load_model(model_path, device=""):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Object Detection using YOLOv8")
-    parser.add_argument(
-        "--model",
-        type=str,
-        default=os.path.join(os.path.dirname(__file__), "runs", "best.pt"),
-        help="Path to the YOLOv8/v11 model",
+    config_yaml = yaml.safe_load(
+        open(
+            os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                "config.yaml",
+            ),
+            encoding="utf-8",
+        )
     )
-    parser.add_argument(
-        "--conf-thres",
-        type=float,
-        default=0.8,
-        help="Confidence threshold for detections",
-    )
-    parser.add_argument(
-        "--iou-thres", type=float, default=0.45, help="IoU threshold for NMS"
-    )
-    parser.add_argument(
-        "--device",
-        type=str,
-        default="",
-        help="Device to run the model on (e.g., 'cpu', '0', '0,1')",
-    )
-    args = parser.parse_args()
+    model_paths = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), path)
+        for path in config_yaml.get("classification_YOLO_model_path", [])
+    ]
+    default_conf_thres = config_yaml.get("default_conf_thres", 0.8)
 
     # Load model
-    model = load_model(args.model, device=args.device)
+    model = load_model(model_paths[0])
 
     # Open video capture
-    cap = open_camera(True, False)
+    camera = Camera(color=True, depth=False)
 
     while True:
-        frames = get_frames(cap)
+        frames = camera.get_frames()
         if frames.get("color") is None:
             print("Failed to grab frame")
             continue
@@ -88,7 +78,9 @@ def main():
 
         # Perform inference
         results = detect_objects_in_frame(
-            model, frames["color"], conf_thres=args.conf_thres, iou_thres=args.iou_thres
+            model,
+            frames["color"],
+            conf_thres=default_conf_thres,
         )
         annotated_frame = frames["color"].copy()
         for (x, y, w, h, r), score, class_id, class_name in results:
@@ -112,10 +104,10 @@ def main():
             (0, 255, 0),
             2,
         )
-        cv2.imshow("YOLOv8 Object Detection", annotated_frame)
+        cv2.imshow("YOLOv11-obb Object Detection", annotated_frame)
         if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
             break
-    close_camera(cap)
+    camera.close()
     cv2.destroyAllWindows()
 
 
