@@ -35,7 +35,7 @@ def main():
     )
     default_conf_thres = config_yaml.get("default_conf_thres", 0.8)
     class_pos = config_yaml.get("class_pos", {})
-    offset = config_yaml.get("catch_offset", 0.01)
+    offset = config_yaml.get("catch_offset", 0.00)
 
     arm = Arm()
     arm.move_to_home(gripper_angle_deg=80)

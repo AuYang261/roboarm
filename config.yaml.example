@@ -17,6 +17,9 @@ default_desktop_height: 0.075
 # 抓取动作间的停顿时间，单位秒
 catch_time_interval_s: 0.1
 
+# 获取机械臂各舵机角度值的重试次数
+get_arm_angles_retry_times: 3
+
 # =======物品分类场景=======
 
 # 以项目根目录为基准

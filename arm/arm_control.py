@@ -53,6 +53,9 @@ class Arm:
             "default_gripper_close_threshold", 3
         )
         self.catch_time_interval_s = self.config_yaml.get("catch_time_interval_s", 0.1)
+        self.get_arm_angles_retry_times = self.config_yaml.get(
+            "get_arm_angles_retry_times", 3
+        )
         port = self.config_yaml.get("arm_port", None)
         if port is None:
             raise ValueError("配置文件中没有设置机械臂端口号 arm_port")
@@ -123,7 +126,7 @@ class Arm:
                 if angle_deg is not None:
                     action[motor_name + ".pos"] = np.clip(angle_deg, -180, 180)
         if len(action) > 0:
-            current_angles_deg, current_gripper_deg = self.get_read_arm_angles()
+            current_angles_deg, current_gripper_deg = self.get_arm_angles()
             if current_angles_deg is None or current_gripper_deg is None:
                 return False
             current_angles_deg.append(current_gripper_deg)
@@ -143,8 +146,8 @@ class Arm:
                 time.sleep(0.5 / self.steps)
         return True
 
-    def get_read_arm_angles(
-        self, retry_times: int = 3
+    def get_arm_angles(
+        self, retry_times=None
     ) -> tuple[Union[List[float], None], Union[float, None]]:
         """
         获取机械臂各关节角度和夹爪状态，单位度
@@ -152,9 +155,11 @@ class Arm:
         try:
             angles_deg = list(self.arm.get_observation().values())
         except Exception as e:
+            if retry_times is None:
+                retry_times = self.get_arm_angles_retry_times
             if retry_times > 0:
                 time.sleep(self.catch_time_interval_s)
-                return self.get_read_arm_angles(retry_times - 1)
+                return self.get_arm_angles(retry_times - 1)
             return None, None
         return [
             angle - offset
@@ -207,7 +212,7 @@ class Arm:
         angles_deg = np.rad2deg(self.chain.inverse_kinematics(goal_tf)).tolist()
         if not self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg):
             return None
-        return self.get_read_arm_angles()
+        return self.get_arm_angles()
 
     def pixel2pos(self, u: float, v: float):
         """
@@ -284,7 +289,7 @@ class Arm:
         time.sleep(self.catch_time_interval_s)
 
         # 确认夹紧成功
-        angles, gripper = self.get_read_arm_angles()
+        angles, gripper = self.get_arm_angles()
         if gripper is None or gripper < self.default_gripper_close_threshold:
             print("夹取失败")
             self.move_to_home(gripper_angle_deg=80)
@@ -386,12 +391,12 @@ if __name__ == "__main__":
     time.sleep(1)
     arm.move_to_home(gripper_angle_deg=80)
     time.sleep(1)
-    angles, gripper = arm.get_read_arm_angles()
+    angles, gripper = arm.get_arm_angles()
     print("机械臂角度:", angles)
     print("夹爪状态:", gripper)
     arm.set_arm_angles(None, gripper_angle_deg=0)
     time.sleep(1)
-    angles, gripper = arm.get_read_arm_angles()
+    angles, gripper = arm.get_arm_angles()
     print("机械臂角度:", angles)
     print("夹爪状态:", gripper)
     arm.move_to_home()
