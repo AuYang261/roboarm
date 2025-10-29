@@ -31,7 +31,7 @@ class Camera:
         self.pipeline = None
         self.cap_rgb = None
         self.cap_depth = None
-        if self.ip == "":
+        if not self.ip:
             self.ip = config.get("camera_ip", "")
         if self.port is None:
             self.port = config.get("camera_port", None)
@@ -45,7 +45,7 @@ class Camera:
             )
 
     def get_frames(self) -> dict:
-        if self.ip == "":
+        if not self.ip:
             return orb_camera.get_frames(self.pipeline)
         else:
             frame_rgb = None
@@ -58,7 +58,7 @@ class Camera:
             return {"color": frame_rgb, "depth": frame_depth}
 
     def close(self):
-        if self.ip == "":
+        if not self.ip:
             orb_camera.close_camera(self.pipeline)
         else:
             orb_camera_client.close_orb_web_camera(self.cap_rgb, self.cap_depth)

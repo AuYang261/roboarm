@@ -8,7 +8,7 @@ arm_offset:
   - 0
 
 # 不用远程摄像头则置空
-camera_ip: 127.0.0.1
+camera_ip: 
 camera_port: 8083
 
 # 默认桌面高度，即在机械臂坐标系下桌面的z坐标，单位米
