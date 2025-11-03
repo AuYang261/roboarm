@@ -3,6 +3,7 @@ draccus==0.11.5
 dynamixel_sdk==3.8.4
 huggingface_hub==0.35.1
 ipython==8.12.3
+numpy==1.26.4
 opencv_python==4.11.0.86
 psutil==7.1.0
 pygame==2.6.1
