@@ -57,7 +57,7 @@ def collect_image_pose(image_points_path, angles_deg_list_path):
     cam = Camera(color=True, depth=False)
     while True:
         try:
-            angles_deg, gripper = arm.get_read_arm_angles()
+            angles_deg, gripper = arm.get_arm_angles()
             if angles_deg is None:
                 print("获取机械臂角度失败")
                 continue
