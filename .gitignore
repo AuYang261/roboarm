@@ -14,5 +14,10 @@ yolov11/
 *.tiff
 
 *.txt
+!requirements.txt
+
+cmd
 
 !docs/*
+
+config.yaml

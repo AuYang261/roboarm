@@ -1,11 +1,12 @@
 # Description: 机械臂控制封装
 from collections.abc import Sequence
+from math import inf
+from re import S
 import sys
 import os
-from unicodedata import digit
-from pygame import init
-from pynput import keyboard
 import time
+
+from flask.cli import F
 
 sys.path.append(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "lerobot/src/")
@@ -15,19 +16,24 @@ from pathlib import Path
 from typing import Union, List
 import kinpy
 import numpy as np
+import yaml
 
 
 class Arm:
 
     def __init__(
         self,
-        port,
-        calibration_dir=os.path.join(os.path.dirname(__file__), "..", "calibration"),
+        config_path: str = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "config.yaml"
+        ),
+        calibration_dir=os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "calibration"
+        ),
         id="koch_follower",
         hand_eye_calibration_file=os.path.join(
             os.path.dirname(__file__), "hand-eye-data/2d_homography.npy"
         ),
-        steps=10,
+        steps=20,
     ):
         """
         初始化机械臂
@@ -35,48 +41,71 @@ class Arm:
         calibration_dir: 标定文件夹路径，包含机械臂offset文件
         id: 机械臂型号，默认"koch_follower"
         hand_eye_calibration_file: 手眼标定文件路径，默认"hand-eye-data/2d_homography.npy"
-        steps: 机械臂插值移动步数，默认20，步数越多越平滑但越慢
+        steps: 机械臂插值移动步数，步数越多越平滑但越慢
         """
-        config = config_koch_follower.KochFollowerConfig(
-            port=port,
-            disable_torque_on_disconnect=True,
-            use_degrees=True,
-            id=id,
-            calibration_dir=Path(calibration_dir).resolve(),
+        if not os.path.exists(config_path):
+            raise FileNotFoundError(
+                f"找不到配置文件，请按 {config_path}.example 创建配置文件{config_path}"
+            )
+        self.config_yaml = yaml.safe_load(open(config_path, "r", encoding="utf-8"))
+        self.desktop_height = self.config_yaml.get("default_desktop_height", 0.075)
+        self.default_gripper_close_threshold = self.config_yaml.get(
+            "default_gripper_close_threshold", 3
         )
+        self.catch_time_interval_s = self.config_yaml.get("catch_time_interval_s", 0.1)
+        self.get_arm_angles_retry_times = self.config_yaml.get(
+            "get_arm_angles_retry_times", 3
+        )
+        port = self.config_yaml.get("arm_port", None)
+        if port is None:
+            raise ValueError("配置文件中没有设置机械臂端口号 arm_port")
         self.steps = steps
         # 这个offset是用来修正机械臂零位的，目前不知道为什么舵机全零位置不是机械臂的零位
         # 所以每次重新标定或在新机械臂上需要重新测量这个offset
-        # 方法是标定完后，把机械臂放到零位位置(见docs/image1.png)，然后读取各关节角度，作为offset保存下来
-        # 一行一个，单位度，夹爪角度不需要
-        self.offset = [
-            float(x.strip())
-            for x in open(
-                os.path.join(calibration_dir, "arm_offset.txt"), "r", encoding="utf-8"
-            ).readlines()
-            if x.strip() != ""
-        ]
+        # 方法见 arm/calibrate.py
+        self.offset = self.config_yaml.get("arm_offset", None)
+        if self.offset is None or len(self.offset) != 5:
+            raise ValueError(
+                "配置文件中没有正确设置机械臂offset arm_offset, 应该是5个关节的角度列表"
+                "运行arm/calibrate.py以获取arm_offset"
+            )
         if os.path.exists(hand_eye_calibration_file):
             self.hand_eye_calibration_matrix = np.load(hand_eye_calibration_file)
-            with open(
-                os.path.join(
-                    os.path.dirname(__file__),
-                    "..",
-                    "urdf",
-                    "low_cost_robot.urdf",
-                ),
-                "r",
-                encoding="utf-8",
-            ) as f:
-                urdf_content = f.read()
-            self.chain = kinpy.build_serial_chain_from_urdf(
-                urdf_content, "gripper_static_1"
-            )
+        with open(
+            os.path.join(
+                os.path.dirname(__file__),
+                "..",
+                "urdf",
+                "low_cost_robot.urdf",
+            ),
+            "r",
+            encoding="utf-8",
+        ) as f:
+            urdf_content = f.read()
+        self.chain = kinpy.build_serial_chain_from_urdf(
+            urdf_content, "gripper_static_1"
+        )
 
-        if len(self.offset) != 5:
-            raise ValueError("机械臂offset文件格式错误，应该有5个值")
-        self.arm = koch_follower.KochFollower(config)
-        self.arm.connect()
+        self.arm = koch_follower.KochFollower(
+            config_koch_follower.KochFollowerConfig(
+                port=port,
+                disable_torque_on_disconnect=True,
+                use_degrees=True,
+                id=id,
+                calibration_dir=Path(calibration_dir).resolve(),
+            )
+        )
+        try:
+            self.arm.connect()
+        except ConnectionError as e:
+            raise ConnectionError(
+                f"机械臂连接失败: {e}\n请检查端口号{port}是否正确"
+                + (
+                    "，以及是否有777权限(sudo chmod 777 {port})"
+                    if os.name != "nt"
+                    else ""
+                )
+            ) from e
 
     def set_arm_angles(
         self,
@@ -97,13 +126,12 @@ class Arm:
                 if angle_deg is not None:
                     action[motor_name + ".pos"] = np.clip(angle_deg, -180, 180)
         if len(action) > 0:
-            current_angles_deg, current_gripper_deg = self.get_read_arm_angles()
+            current_angles_deg, current_gripper_deg = self.get_arm_angles()
             if current_angles_deg is None or current_gripper_deg is None:
-                self.arm.set_action(action)
-                return
+                return False
             current_angles_deg.append(current_gripper_deg)
             # 对角度插值
-            for alpha in np.linspace(0, 1, self.steps):
+            for alpha in np.linspace(0, 1, self.steps + 1)[1:]:
                 interp_action = {}
                 for key, value in action.items():
                     motor_index = motor_names.index(key.removesuffix(".pos"))
@@ -115,10 +143,11 @@ class Arm:
                         else 0
                     )
                 self.arm.send_action(interp_action)
-                time.sleep(0.05)
+                time.sleep(0.5 / self.steps)
+        return True
 
-    def get_read_arm_angles(
-        self,
+    def get_arm_angles(
+        self, retry_times=None
     ) -> tuple[Union[List[float], None], Union[float, None]]:
         """
         获取机械臂各关节角度和夹爪状态，单位度
@@ -126,6 +155,11 @@ class Arm:
         try:
             angles_deg = list(self.arm.get_observation().values())
         except Exception as e:
+            if retry_times is None:
+                retry_times = self.get_arm_angles_retry_times
+            if retry_times > 0:
+                time.sleep(self.catch_time_interval_s)
+                return self.get_arm_angles(retry_times - 1)
             return None, None
         return [
             angle - offset
@@ -149,6 +183,7 @@ class Arm:
         机械臂回到初始位置
         """
         self.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=gripper_angle_deg)
+        return self.chain.forward_kinematics(np.deg2rad([0, 0, 0, 0, 0]).tolist())
 
     def move_to(
         self,
@@ -175,8 +210,9 @@ class Arm:
             pos=np.array(pos), rot=[0, 0, -rot_rad if rot_rad else 0]
         )
         angles_deg = np.rad2deg(self.chain.inverse_kinematics(goal_tf)).tolist()
-        self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg)
-        return self.get_read_arm_angles()
+        if not self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg):
+            return None
+        return self.get_arm_angles()
 
     def pixel2pos(self, u: float, v: float):
         """
@@ -198,24 +234,21 @@ class Arm:
         target_x: float,
         target_y: float,
         rad: float,
-        place_pos: list[float | int] = [0.2, 0.2],
-        height: float = 0.07,
-        time_interval_s: float = 0.5,
-        gripper_threshold_deg: float | int = 5,
+        height: float = inf,
     ):
         """
         机械臂抓取物体并放到指定位置
         target_x, target_y: 目标物体位置，单位米
         rad: 物体旋转角度，单位弧度
-        place_pos: 放置位置，单位米，默认[0.2, 0.2]
-        height: 目标物体高度，单位米，默认0.07米
-        time_interval_s: 每个动作之间的时间间隔，单位秒，默认0.5秒
-        gripper_threshold_deg: 夹爪闭合角度阈值，单位度，默认5度，小于该值认为夹取失败
+        height: 目标物体高度，单位米，默认桌面高度
         """
+
+        if height == inf:
+            height = self.desktop_height
 
         # 移动机械臂到目标位置上方
         res = self.move_to(
-            [target_x, target_y, height + 0.05],
+            [target_x, target_y, height + 0.1],
             gripper_angle_deg=80,
             rot_rad=rad,
             warning=False,
@@ -223,8 +256,8 @@ class Arm:
         if res is None:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_angle_deg=80)
-            return
-        time.sleep(time_interval_s)
+            return False
+        time.sleep(self.catch_time_interval_s)
 
         # 下降到目标位置
         res = self.move_to(
@@ -235,16 +268,16 @@ class Arm:
         if res is None:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_angle_deg=80)
-            return
-        time.sleep(time_interval_s)
+            return False
+        time.sleep(self.catch_time_interval_s)
 
         # 夹紧物体
         self.set_arm_angles(gripper_angle_deg=0)
-        time.sleep(time_interval_s)
+        time.sleep(self.catch_time_interval_s)
 
         # 抬起物体
         res = self.move_to(
-            [target_x, target_y, height + 0.05],
+            [target_x, target_y, height + 0.1],
             gripper_angle_deg=0,
             rot_rad=rad,
             warning=False,
@@ -252,57 +285,118 @@ class Arm:
         if res is None:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_angle_deg=80)
-            return
-        time.sleep(time_interval_s)
+            return False
+        time.sleep(self.catch_time_interval_s)
 
         # 确认夹紧成功
-        angles, gripper = self.get_read_arm_angles()
-        if gripper is None or gripper < gripper_threshold_deg:
+        angles, gripper = self.get_arm_angles()
+        if gripper is None or gripper < self.default_gripper_close_threshold:
             print("夹取失败")
             self.move_to_home(gripper_angle_deg=80)
-            return
+            return False
+        time.sleep(self.catch_time_interval_s)
+        return True
 
-        # 放到指定位置
+    def place(
+        self,
+        target_x: float,
+        target_y: float,
+        target_z: float,
+        rad: float,
+    ):
+        """
+        机械臂放置物体到指定位置
+        target_x, target_y, target_z: 目标位置，单位米
+        rad: 物体旋转角度，单位弧度
+        """
+
+        # 移动机械臂到目标位置上方
         res = self.move_to(
-            place_pos + [height + 0.1], gripper_angle_deg=0, warning=False
+            [target_x, target_y, target_z + 0.1],
+            gripper_angle_deg=0,
+            rot_rad=rad,
+            warning=False,
         )
         if res is None:
-            print("移动到目标位置失败，取消抓取")
+            print("移动到目标位置失败，取消放置")
             self.move_to_home(gripper_angle_deg=80)
-            return
-        time.sleep(time_interval_s)
-        res = self.move_to(place_pos + [height], gripper_angle_deg=0)
+            return False
+        time.sleep(self.catch_time_interval_s)
+
+        # 下降到目标位置
+        res = self.move_to(
+            [target_x, target_y, target_z],
+            gripper_angle_deg=0,
+            rot_rad=rad,
+        )
         if res is None:
-            print("移动到目标位置失败，取消抓取")
+            print("移动到目标位置失败，取消放置")
             self.move_to_home(gripper_angle_deg=80)
-            return
-        time.sleep(time_interval_s)
+            return False
+        time.sleep(self.catch_time_interval_s)
+
+        # 放开物体
         self.set_arm_angles(gripper_angle_deg=80)
-        time.sleep(time_interval_s)
-        res = self.move_to(place_pos + [height + 0.1], warning=False)
+        time.sleep(self.catch_time_interval_s)
+
+        # 抬起机械臂
+        res = self.move_to(
+            [target_x, target_y, target_z + 0.1],
+            gripper_angle_deg=80,
+            rot_rad=rad,
+            warning=False,
+        )
         if res is None:
-            print("移动到目标位置失败，取消抓取")
+            print("移动到目标位置失败，取消放置")
             self.move_to_home(gripper_angle_deg=80)
-            return
-        time.sleep(time_interval_s)
+            return False
+        time.sleep(self.catch_time_interval_s)
+        return True
+
+    def catch_and_place(
+        self,
+        target_x: float,
+        target_y: float,
+        rad: float,
+        place_pos: list[float | int] = [0.2, 0.0],
+        height: float = inf,
+    ):
+        """
+        机械臂抓取物体并放到初始位置
+        target_x, target_y: 目标物体位置，单位米
+        rad: 物体旋转角度，单位弧度
+        place_pos: 放置位置[x, y]或[x, y, z]，单位米，默认[0.2, 0.0, 桌面高度]
+        height: 目标物体高度，单位米，默认桌面高度
+        """
+        if len(place_pos) == 2:
+            place_x, place_y = place_pos
+            place_z = self.desktop_height
+        elif len(place_pos) == 3:
+            place_x, place_y, place_z = place_pos
+        else:
+            print("放置位置格式错误，应该是[x, y]或[x, y, z]")
+            return False
+        if not self.catch(target_x, target_y, rad, height=height):
+            self.move_to_home(gripper_angle_deg=80)
+            return False
+        if not self.place(place_x, place_y, place_z, rad):
+            self.move_to_home(gripper_angle_deg=80)
+            return False
         self.move_to_home(gripper_angle_deg=80)
-        time.sleep(time_interval_s)
+        return True
 
 
 if __name__ == "__main__":
-    arm = Arm("COM3")
-    # arm.disable_torque()
-    # while True:
-    #     print(arm.get_read_arm_angles())
+    arm = Arm()
     time.sleep(1)
     arm.move_to_home(gripper_angle_deg=80)
     time.sleep(1)
-    angles, gripper = arm.get_read_arm_angles()
+    angles, gripper = arm.get_arm_angles()
     print("机械臂角度:", angles)
     print("夹爪状态:", gripper)
     arm.set_arm_angles(None, gripper_angle_deg=0)
     time.sleep(1)
-    angles, gripper = arm.get_read_arm_angles()
+    angles, gripper = arm.get_arm_angles()
     print("机械臂角度:", angles)
     print("夹爪状态:", gripper)
     arm.move_to_home()

@@ -1,5 +1,8 @@
+# Description: 调用目标识别和机械臂控制，实现抓取功能。
 import sys
 import os
+
+import yaml
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from arm.arm_control import Arm
@@ -9,7 +12,7 @@ from classification.object_detect.detect import (
     load_model,
     draw_box,
 )
-from camera.orb_camera import open_camera, get_frames, close_camera
+from camera.camera_api import Camera
 import cv2
 import time
 import concurrent.futures
@@ -17,32 +20,57 @@ import concurrent.futures
 
 def main():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    model_path = os.path.join(
-        os.path.dirname(__file__), "object_detect", "runs", "best.pt"
+    config_yaml = yaml.safe_load(
+        open(
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml"),
+            encoding="utf-8",
+        )
     )
+    model_paths = [
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
+        for path in config_yaml.get("classification_YOLO_model_path", [])
+    ]
+    default_gripper_aside_pos = config_yaml.get(
+        "default_gripper_aside_pos", [0.1, 0.0, 0.12]
+    )
+    default_conf_thres = config_yaml.get("default_conf_thres", 0.8)
+    class_pos = config_yaml.get("class_pos", {})
+    offset = config_yaml.get("catch_offset", 0.00)
 
-    arm = Arm(port="COM3")
+    arm = Arm()
     arm.move_to_home(gripper_angle_deg=80)
-    cam = open_camera(color=True, depth=False)
-    model = load_model(model_path)
+    cam = Camera(color=True, depth=False)
+    models = [load_model(model_path) for model_path in model_paths]
+    detections = []
     future = None
 
-    while True:
+    err_cnt = 0
+
+    while err_cnt < 100:
         start_time = time.time()
         try:
-            frames = get_frames(cam)
+            frames = cam.get_frames()
             if frames is None:
+                err_cnt += 1
                 continue
             frame = frames.get("color")
             if frame is None:
+                err_cnt += 1
                 continue
 
-            detections = detect_objects_in_frame(model, frame, conf_thres=0.7)
+            if future is None or future.done():
+                detections = []
+                for model in models:
+                    detections.extend(
+                        detect_objects_in_frame(
+                            model, frame, conf_thres=default_conf_thres
+                        )
+                    )
             if len(detections) == 0 and (future is None or future.done()):
                 # 移到旁边以免挡住视野
                 future = executor.submit(
                     arm.move_to,
-                    [0.1, 0.0, 0.12],
+                    default_gripper_aside_pos,
                     80,
                 )
             for (u, v, w, h, r), score, class_id, class_name in detections:
@@ -74,20 +102,21 @@ def main():
                     if gripper_angle_rad > np.pi / 2:
                         gripper_angle_rad -= np.pi
 
-                    # 夹爪向外偏移一些，避免刚好顶到物体
-                    offset = 0.00
                     future = executor.submit(
-                        arm.catch,
+                        arm.catch_and_place,
+                        # 夹爪向外偏移一些，避免刚好顶到物体
                         target_x + offset * np.cos(gripper_angle_rad),
                         target_y + offset * np.sin(-gripper_angle_rad),
                         gripper_angle_rad,
-                        [0.2, 0.0],
-                        0.075,
+                        class_pos.get(class_name, [-0.2, 0.0]),
                     )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 
             end_time = time.time()
-            fps = 1 / (end_time - start_time)
+            if end_time - start_time == 0:
+                fps = 0.0
+            else:
+                fps = 1 / (end_time - start_time)
             cv2.putText(
                 frame,
                 f"FPS: {fps:.2f}",
@@ -100,13 +129,14 @@ def main():
             cv2.imshow("Detections", frame)
             if cv2.waitKey(1) & 0xFF == 27:  # 按Esc键退出
                 break
-
+            err_cnt = 0
         except KeyboardInterrupt:
             print("Exiting...")
 
     arm.move_to_home(gripper_angle_deg=80)
+    time.sleep(1)
     arm.disconnect_arm()
-    close_camera(cam)
+    cam.close()
     cv2.destroyAllWindows()
 
 

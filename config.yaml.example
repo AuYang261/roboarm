@@ -1,0 +1,56 @@
+
+arm_port: COM3
+arm_offset:
+  - 0
+  - -30
+  - -40
+  - -50
+  - 0
+
+# 不用远程摄像头则置空
+camera_ip: 
+camera_port: 8083
+
+# 默认桌面高度，即在机械臂坐标系下桌面的z坐标，单位米
+default_desktop_height: 0.075
+
+# 抓取动作间的停顿时间，单位秒
+catch_time_interval_s: 0.1
+
+# 获取机械臂各舵机角度值的重试次数
+get_arm_angles_retry_times: 3
+
+# =======物品分类场景=======
+
+# 以项目根目录为基准
+classification_YOLO_model_path:
+  - classification\object_detect\runs\积木方块\best.pt
+#  - classification\object_detect\runs\积木螺丝国际象棋\best.pt
+
+# 默认YOLO识别置信度阈值
+default_conf_thres: 0.85
+
+# 机械臂移动到旁边的位置，以免挡住相机视野，(x,y,z)，单位米
+default_gripper_aside_pos:
+  - 0.1
+  - 0.0
+  - 0.12
+
+# 夹爪闭合角度阈值，小于该值认为夹取失败，单位度
+default_gripper_close_threshold: 3
+
+# 各类别放置位置
+class_pos:
+  blue_block:
+    - 0.2
+    - 0
+  white_block:
+    - -0.2
+    - 0
+
+# 抓取时为避免刚好顶到物体，夹爪向外偏移一些的距离，单位米
+catch_offset: 0.01
+
+# =======主从臂跟随场景=======
+
+leader_port: COM5
