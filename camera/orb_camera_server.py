@@ -3,14 +3,17 @@
 import cv2
 import numpy as np
 from pyorbbecsdk import (
-    Pipeline,
     Config,
+    Pipeline,
     OBSensorType,
-    OBFrameType,
+    FrameSet,
+    Context,
     OBFormat,
     OBError,
-    VideoStreamProfile,
+    OBAlignMode,
+    OBFrameType,
 )
+
 from utils import frame_to_bgr_image
 import argparse
 import time, json, threading
@@ -18,12 +21,13 @@ from flask import Flask, Response
 
 # cached frames for better visualization
 cached_frames = {
-    'color': None,
-    'depth': None,
-    'left_ir': None,
-    'right_ir': None,
-    'ir': None
+    "color": None,
+    "depth": None,
+    "left_ir": None,
+    "right_ir": None,
+    "ir": None,
 }
+
 
 def setup_camera():
     """Setup camera and stream configuration"""
@@ -37,7 +41,7 @@ def setup_camera():
         OBSensorType.DEPTH_SENSOR,
         OBSensorType.IR_SENSOR,
         OBSensorType.LEFT_IR_SENSOR,
-        OBSensorType.RIGHT_IR_SENSOR
+        OBSensorType.RIGHT_IR_SENSOR,
     ]
     sensor_list = device.get_sensor_list()
     for sensor in range(len(sensor_list)):
@@ -47,38 +51,141 @@ def setup_camera():
                 config.enable_stream(sensor_type)
         except:
             continue
-
+        
     pipeline.start(config)
     return pipeline
 
+
 def setup_imu():
     """Setup IMU configuration"""
-    pipeline = Pipeline()   
+    pipeline = Pipeline()
     config = Config()
     config.enable_accel_stream()
     config.enable_gyro_stream()
     pipeline.start(config)
     return pipeline
 
+def hw_d2c_align_stream_config(pipeline: Pipeline):
+    """
+    Gets the stream configuration for the pipeline.
+
+    Args:
+        pipeline (Pipeline): The pipeline object.
+
+    Returns:
+        Config: The stream configuration.
+    """
+    config = Config()
+    try:
+        # Get the list of color stream profiles
+        profile_list = pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
+        assert profile_list is not None
+        
+        # Iterate through the color stream profiles
+        for i in range(len(profile_list)):
+            color_profile = profile_list[i]
+            
+            # Check if the color format is RGB
+            if color_profile.get_format() != OBFormat.RGB:
+                continue
+            
+            # Get the list of hardware aligned depth-to-color profiles
+            hw_d2c_profile_list = pipeline.get_d2c_depth_profile_list(color_profile, OBAlignMode.HW_MODE)
+            if len(hw_d2c_profile_list) == 0:
+                continue
+            
+            # Get the first hardware aligned depth-to-color profile
+            hw_d2c_profile = hw_d2c_profile_list[0]
+            print("hw_d2c_profile: ", hw_d2c_profile)
+            
+            # Enable the depth and color streams
+            config.enable_stream(hw_d2c_profile)
+            config.enable_stream(color_profile)
+            
+            # Set the alignment mode to hardware alignment
+            config.set_align_mode(OBAlignMode.HW_MODE)
+            return config
+    except Exception as e:
+        print(e)
+        return None
+    return None
+
+def process_d2c(color_frame, depth_frame, min_depth=20, max_depth=10000) -> dict:
+
+    if not color_frame or not depth_frame:
+        # print("process_d2c: missing color_frame or depth_frame")
+        return None
+    depth_format = depth_frame.get_format()
+    if depth_format != OBFormat.Y16:
+        print("depth format is not Y16")
+        return None
+
+    # Convert the color frame to a BGR image
+    color_image = frame_to_bgr_image(color_frame)
+    if color_image is None:
+        print("Failed to convert frame to image")
+        return None
+
+    # Get the depth data
+    depth_data = np.frombuffer(depth_frame.get_data(), dtype=np.uint16).reshape(
+        (depth_frame.get_height(), depth_frame.get_width()))
+    
+    # Convert depth data to float32 and apply depth scale
+    depth_data = depth_data.astype(np.float32) * depth_frame.get_depth_scale()
+    
+    # Apply custom depth range, clip depth data
+    depth_data = np.clip(depth_data, min_depth, max_depth)
+    
+    # Normalize depth data for display
+    depth_image = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX)
+    depth_image = cv2.applyColorMap(depth_image.astype(np.uint8), cv2.COLORMAP_JET)
+
+    return {"color": color_image, "depth": depth_image}
+
+def get_depth_data(depth_frame, min_depth=20, max_depth=10000):
+    if not depth_frame:
+        # print("process_d2c: missing color_frame or depth_frame")
+        return None
+    depth_format = depth_frame.get_format()
+    if depth_format != OBFormat.Y16:
+        print("depth format is not Y16")
+        return None
+
+    # Get the depth data
+    depth_data = np.frombuffer(depth_frame.get_data(), dtype=np.uint16).reshape(
+        (depth_frame.get_height(), depth_frame.get_width()))
+    
+    # Convert depth data to float32 and apply depth scale
+    depth_data = depth_data.astype(np.float32) * depth_frame.get_depth_scale()
+    
+    # Apply custom depth range, clip depth data
+    depth_data = np.clip(depth_data, min_depth, max_depth)
+    
+    return depth_data
+
 def process_color(frame):
     """Process color image"""
-    frame = frame if frame else cached_frames['color']
-    cached_frames['color'] = frame
+    frame = frame if frame else cached_frames["color"]
+    cached_frames["color"] = frame
     return frame_to_bgr_image(frame) if frame else None
+
 
 def process_depth(frame):
     """Process depth image"""
-    frame = frame if frame else cached_frames['depth']
-    cached_frames['depth'] = frame
+    frame = frame if frame else cached_frames["depth"]
+    cached_frames["depth"] = frame
     if not frame:
         return None
     try:
         depth_data = np.frombuffer(frame.get_data(), dtype=np.uint16)
         depth_data = depth_data.reshape(frame.get_height(), frame.get_width())
-        depth_image = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+        depth_image = cv2.normalize(
+            depth_data, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U
+        )
         return cv2.applyColorMap(depth_image, cv2.COLORMAP_JET)
     except ValueError:
         return None
+
 
 def process_ir(ir_frame):
     """Process IR frame (left or right) to RGB image"""
@@ -115,6 +222,7 @@ def process_ir(ir_frame):
     ir_data = ir_data.astype(data_type)
     return cv2.cvtColor(ir_data, cv2.COLOR_GRAY2RGB)
 
+
 def get_imu_text(frame, name):
     """Format IMU data"""
     if not frame:
@@ -122,7 +230,7 @@ def get_imu_text(frame, name):
     return [
         f"{name} x: {frame.get_x():.2f}",
         f"{name} y: {frame.get_y():.2f}",
-        f"{name} z: {frame.get_z():.2f}"
+        f"{name} z: {frame.get_z():.2f}",
     ]
 
 def create_display(frames, width=1280, height=720):
@@ -151,6 +259,7 @@ def create_display(frames, width=1280, height=720):
             y_offset += 80
 
     return display
+
 
 def display_stream():
     # Window settings
@@ -216,7 +325,9 @@ class TemporalFilter:
         if self.previous_frame is None:
             result = frame
         else:
-            result = cv2.addWeighted(frame, self.alpha, self.previous_frame, 1 - self.alpha, 0)
+            result = cv2.addWeighted(
+                frame, self.alpha, self.previous_frame, 1 - self.alpha, 0
+            )
         self.previous_frame = result
         return result
 
@@ -339,8 +450,8 @@ def start_rgb_server(host, port):
             except KeyboardInterrupt:
                 pass
         
-    @app.route('/video_feed_color')
-    def video_feed_color():
+    @app.route('/rgb_stream')
+    def rgb_stream():
         return Response(generate_frames(),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
     
@@ -362,7 +473,9 @@ def start_depth_server(host, port):
         try:
             # 1280*720
             # color_profile: VideoStreamProfile = profile_list.get_video_stream_profile(640, 0, OBFormat.RGB, 30)
-            color_profile: VideoStreamProfile = profile_list.get_video_stream_profile(1280, 720, OBFormat.RGB, 30)
+            color_profile: VideoStreamProfile = profile_list.get_video_stream_profile(
+                1280, 720, OBFormat.RGB, 30
+            )
         except OBError as e:
             print(e)
             color_profile = profile_list.get_default_video_stream_profile()
@@ -401,6 +514,7 @@ def start_depth_server(host, port):
                 # Apply temporal filtering
                 depth_data = temporal_filter.process(depth_data)
 
+                # 计算中心点距离
                 center_y = int(height / 2)
                 center_x = int(width / 2)
                 center_distance = depth_data[center_y, center_x]
@@ -434,6 +548,7 @@ def start_depth_server(host, port):
 
 global_processed_frames = None
 global_ir_frame = None
+global_imu_data = None
 metadata_lock = threading.Lock()
 
 def frame_generator(pipeline, imu_pipeline):
@@ -469,6 +584,9 @@ def frame_generator(pipeline, imu_pipeline):
                 'accel': accel.as_accel_frame(),
                 'gyro': gyro.as_gyro_frame()
             }
+        
+        # 获取 点云 pointcloud
+        
 
         # 更新 共享数据
         with metadata_lock:
@@ -545,11 +663,12 @@ def start_usb_camera_server(host: str, port: int, camera_index: int):
 
     cap.release()
 
-
 def main():
     parser = argparse.ArgumentParser(description="ORB-NET Camera Server")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind the server")
-    parser.add_argument("--port", type=int, default=8081, help="Port to bind the server")
+    parser.add_argument(
+        "--port", type=int, default=8083, help="Port to bind the server"
+    )
     parser.add_argument("--idx", type=int, default=4, help="camera index")
     parser.add_argument("--mode", type=str, default="multi", help="Video source (default: rgb)")
     args = parser.parse_args()
@@ -565,6 +684,7 @@ def main():
         start_multi_server(args.host, args.port)
     elif args.mode == "usb":
         start_usb_camera_server(args.host, args.port, args.idx)
+
 
 if __name__ == "__main__":
     main()

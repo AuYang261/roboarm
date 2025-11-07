@@ -1,12 +1,10 @@
-# 三位手眼标定，存在标定板固定困难和相机视角范围过小的问题，未测试过，故暂不可用
+# Description: 三位手眼标定，存在标定板固定困难和相机视角范围过小的问题，未测试过，故暂不可用
 from collections.abc import Sequence
 import sys
 import os
 
-from matplotlib.transforms import Transform
-
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from camera.orb_camera import open_camera, get_frames, close_camera
+from camera.camera_api import Camera
 from arm.arm_control import Arm
 import cv2
 import xlrd2, xlwt
@@ -18,7 +16,7 @@ import time
 import threading
 
 
-# 这个类从https://blog.csdn.net/yangbisheng1121/article/details/128643477复制过来的
+# 这个类是从https://blog.csdn.net/yangbisheng1121/article/details/128643477 复制过来的
 class Calibration:
     def __init__(self):
         # 相机内参
@@ -239,20 +237,20 @@ def collect_image_pose():
             )
         ).read()
     )
-    arm = Arm("COM3")
+    arm = Arm()
     arm.disable_torque()
     time.sleep(1)
     data = xlwt.Workbook()
     table = data.add_sheet("pose")
     rows_num = 0
-    cam = open_camera(color=True, depth=False)
+    cam = Camera(color=True, depth=False)
     while True:
         try:
             # arm.set_arm_angles(
             #     [goal_angles[i] for i in range(len(goal_angles))],
             #     gripper_angle=goal_gripper_angle,
             # )
-            angles, gripper = arm.get_read_arm_angles()
+            angles, gripper = arm.get_arm_angles()
             if angles is None:
                 print("获取机械臂角度失败")
                 continue
@@ -261,7 +259,7 @@ def collect_image_pose():
             print("夹爪位置:", end_pose.pos)
             print("夹爪旋转矩阵:\n", end_pose.rot_mat)
 
-            frames = get_frames(cam)
+            frames = cam.get_frames()
             color_image = frames.get("color")
             if color_image is None:
                 print("failed to get color image")
@@ -291,7 +289,7 @@ def collect_image_pose():
             break
     data.save(pose_path)
     cv2.destroyAllWindows()
-    close_camera(cam)
+    cam.close()
     arm.disconnect_arm()
 
     return image_path, pose_path

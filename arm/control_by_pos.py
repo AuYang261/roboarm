@@ -2,12 +2,9 @@
 import sys
 import os
 
-from sympy import im
-
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from arm.arm_control import Arm
 import numpy as np
-from typing import Sequence, List, Union
 import time
 from pynput import keyboard
 import threading
@@ -31,16 +28,20 @@ def on_press(key):
             POS[0] += 0.01
             print("Current position:", POS)
         elif key.char == "z" and POS[3] < 90:
-            POS[3] += 5
+            POS[3] += 0.1
             print("Current position:", POS)
         elif key.char == "c" and POS[3] > 0:
-            POS[3] -= 5
+            POS[3] -= 0.1
             print("Current position:", POS)
         elif key.char == "e":
             POS[4] = 0
             print("Current position:", POS)
         elif key.char == "q":
             POS[4] = 80
+            print("Current position:", POS)
+        elif key.char == "r":
+            # 随机
+            POS[:3] = np.random.uniform([-0.2, 0, 0.07], [0.2, 0.3, 0.17]).tolist()
             print("Current position:", POS)
     except AttributeError:
         if key == keyboard.Key.shift and POS[2] > 0.05:
@@ -68,19 +69,18 @@ def main():
     input_thread = threading.Thread(target=get_input)
     input_thread.daemon = True
     input_thread.start()
-    arm = Arm("COM3")
+    arm = Arm()
     POS[:3] = arm.move_to_home(gripper_angle_deg=80).pos  # type: ignore
     time.sleep(1)
     while True:
         try:
-            if len(POS) == 0:
+            if len(POS) != 5:
                 arm.move_to_home(gripper_angle_deg=80)
                 arm.disconnect_arm()
-                exit(0)
+                return
             arm.move_to(
-                POS[:3], gripper_angle_deg=POS[4], rot_deg=POS[3], warning=False
+                POS[:3], gripper_angle_deg=POS[4], rot_rad=POS[3], warning=False
             )
-            time.sleep(0.1)
         except Exception as e:
             print("Error:", e)
             time.sleep(0.5)

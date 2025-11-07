@@ -42,7 +42,7 @@ def loop():
 
     # Updating the end-effector target (now very close to the robot workspace boundary)
     # Reduced to approx [0.18, 0.05, 0.18(+/-0.03)] so the end-effector almost reaches the points
-    target = [0.18, np.cos(t) * 0.05, 0.18 + np.sin(2 * t) * 0.03]
+    target = [np.cos(t) * 0.05, 0.1, 0.1 + np.sin(2 * t) * 0.03]
     effector_task.T_world_frame = tf.translation_matrix(target)
 
     # Solving the IK

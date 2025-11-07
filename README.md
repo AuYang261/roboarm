@@ -1,4 +1,4 @@
-# WOWROBO 机械臂+深度相机项目
+# ROBOARM 机械臂+深度相机项目
 
 ## 机械臂坐标定义
 
@@ -8,20 +8,7 @@
 
 ## 机械臂标定
 
-运行以下命令进行机械臂标定，`--robot.port`参数根据实际情况修改为机械臂连接的串口号，`--robot.calibration_dir`参数指定标定数据保存的目录。
-
-```bash
-python lerobot\src\lerobot\calibrate.py --robot.type koch_follower --robot.port COM3 --robot.id koch_follower --robot.calibration_dir calibration/
-```
-
-缺什么库装什么库。如果报错找不到lerobot，需要在calibrate.py中前面添加：
-
-```python
-import sys
-import os
-
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-```
+见[Roboarm机械臂文档](https://s1vvxephwhf.feishu.cn/wiki/Ulmsw4FPziq8oFkb8eXcx875nfe)
 
 ## 步骤
 
