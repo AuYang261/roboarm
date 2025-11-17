@@ -37,7 +37,6 @@ class Arm:
     ):
         """
         初始化机械臂
-        port: 机械臂串口号
         calibration_dir: 标定文件夹路径，包含机械臂offset文件
         id: 机械臂型号，默认"koch_follower"
         hand_eye_calibration_file: 手眼标定文件路径，默认"hand-eye-data/2d_homography.npy"

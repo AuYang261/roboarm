@@ -39,7 +39,7 @@ default_gripper_aside_pos:
 # 夹爪闭合角度阈值，小于该值认为夹取失败，单位度
 default_gripper_close_threshold: 3
 
-# 各类别放置位置
+# 各类别放置位置，(x,y)，单位米
 class_pos:
   blue_block:
     - 0.2
