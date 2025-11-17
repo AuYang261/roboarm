@@ -2,8 +2,6 @@
 import sys
 import os
 
-import yaml
-
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from arm.arm_control import Arm
 import numpy as np
@@ -15,6 +13,7 @@ from classification.object_detect.detect import (
 from camera.camera_api import Camera
 import cv2
 import time
+import yaml
 import concurrent.futures
 
 
@@ -44,18 +43,14 @@ def main():
     detections = []
     future = None
 
-    err_cnt = 0
-
-    while err_cnt < 100:
+    while True:
         start_time = time.time()
         try:
             frames = cam.get_frames()
             if frames is None:
-                err_cnt += 1
                 continue
             frame = frames.get("color")
             if frame is None:
-                err_cnt += 1
                 continue
 
             if future is None or future.done():
@@ -129,7 +124,6 @@ def main():
             cv2.imshow("Detections", frame)
             if cv2.waitKey(1) & 0xFF == 27:  # 按Esc键退出
                 break
-            err_cnt = 0
         except KeyboardInterrupt:
             print("Exiting...")
 
