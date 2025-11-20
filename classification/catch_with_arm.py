@@ -34,6 +34,7 @@ def main():
     )
     default_conf_thres = config_yaml.get("default_conf_thres", 0.8)
     class_pos = config_yaml.get("class_pos", {})
+    place_distance_threshold = config_yaml.get("place_distance_threshold", 0.03)
     offset = config_yaml.get("catch_offset", 0.00)
 
     arm = Arm()
@@ -61,13 +62,6 @@ def main():
                             model, frame, conf_thres=default_conf_thres
                         )
                     )
-            if len(detections) == 0 and (future is None or future.done()):
-                # 移到旁边以免挡住视野
-                future = executor.submit(
-                    arm.move_to,
-                    default_gripper_aside_pos,
-                    80,
-                )
             for (u, v, w, h, r), score, class_id, class_name in detections:
                 angle_deg = np.rad2deg(r)
                 if future is None or future.done():
@@ -97,16 +91,34 @@ def main():
                     if gripper_angle_rad > np.pi / 2:
                         gripper_angle_rad -= np.pi
 
-                    future = executor.submit(
-                        arm.catch_and_place,
-                        # 夹爪向外偏移一些，避免刚好顶到物体
-                        target_x + offset * np.cos(gripper_angle_rad),
-                        target_y + offset * np.sin(-gripper_angle_rad),
-                        gripper_angle_rad,
-                        class_pos.get(class_name, [-0.2, 0.0]),
-                    )
+                    if (
+                        np.linalg.norm(
+                            np.array(class_pos.get(class_name, [-0.2, 0.0]))
+                            - np.array([target_x, target_y])
+                        )
+                        < place_distance_threshold
+                    ):
+                        print(
+                            f"Object {class_name} is too close to place position, skipping catch."
+                        )
+                    else:
+                        future = executor.submit(
+                            arm.catch_and_place,
+                            # 夹爪向外偏移一些，避免刚好顶到物体
+                            target_x + offset * np.cos(gripper_angle_rad),
+                            target_y + offset * np.sin(-gripper_angle_rad),
+                            gripper_angle_rad,
+                            class_pos.get(class_name, [-0.2, 0.0]),
+                        )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 
+            if future is None or future.done():
+                # 移到旁边以免挡住视野
+                future = executor.submit(
+                    arm.move_to,
+                    default_gripper_aside_pos,
+                    80,
+                )
             end_time = time.time()
             if end_time - start_time == 0:
                 fps = 0.0

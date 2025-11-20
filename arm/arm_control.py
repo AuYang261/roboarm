@@ -141,7 +141,11 @@ class Arm:
                         if motor_index < len(self.offset)
                         else 0
                     )
-                self.arm.send_action(interp_action)
+                try:
+                    self.arm.send_action(interp_action)
+                except Exception as e:
+                    print(f"设置机械臂角度失败: {e}")
+                    return False
                 time.sleep(0.5 / self.steps)
         return True
 
