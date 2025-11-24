@@ -13,8 +13,6 @@ class Camera:
 
     def __init__(
         self,
-        ip: str = "",
-        port: int | None = None,
         color: bool = True,
         depth: bool = False,
     ):
@@ -24,17 +22,13 @@ class Camera:
                 encoding="utf-8",
             )
         )
-        self.ip = ip
-        self.port = port
+        self.ip = config.get("camera_ip", "")
+        self.port = config.get("camera_port", None)
         self.color = color
         self.depth = depth
         self.pipeline = None
         self.cap_rgb = None
         self.cap_depth = None
-        if not self.ip:
-            self.ip = config.get("camera_ip", "")
-        if self.port is None:
-            self.port = config.get("camera_port", None)
         if not self.ip:
             self.pipeline = orb_camera.open_camera(self.color, self.depth)
         else:
