@@ -2,7 +2,6 @@
 # 导入CV2模块
 import cv2
 import wmi
-import ctypes
 
 def extract_vid_pid(hardware_id: str) -> str:
     """ 从硬件ID中提取VID和PID部分
@@ -69,7 +68,7 @@ def usb_camera_show(camera_index = 1):
     # 释放画面
     cap.release()
     cv2.destroyAllWindows()
-    
+
 if __name__ == '__main__':
     
     # 电脑摄像头 guid : {ca3e7ab9-b4c3-4ae6-8251-579ef933890f}
@@ -94,5 +93,3 @@ if __name__ == '__main__':
     usb_camera_capture(4)
     
     usb_camera_show(4)
-    
-
