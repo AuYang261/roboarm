@@ -50,14 +50,14 @@ def main():
     config_yaml = yaml.safe_load(
         open(
             os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                os.path.dirname(os.path.dirname(__file__)),
                 "config.yaml",
             ),
             encoding="utf-8",
         )
     )
     model_paths = [
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), path)
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
         for path in config_yaml.get("classification_YOLO_model_path", [])
     ]
     default_conf_thres = config_yaml.get("default_conf_thres", 0.8)
