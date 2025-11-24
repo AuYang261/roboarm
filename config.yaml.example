@@ -49,7 +49,7 @@ class_pos:
     - 0
 
 # 离放置位置多近时无需抓取，以免反复抓放，单位米
-place_distance_threshold: 0.05
+place_distance_threshold: 0.07
 
 # 抓取时为避免刚好顶到物体，夹爪向外偏移一些的距离，单位米
 catch_offset: 0.01
@@ -57,3 +57,15 @@ catch_offset: 0.01
 # =======主从臂跟随场景=======
 
 leader_port: COM5
+
+# =======中国象棋场景=======
+
+# 以项目根目录为基准
+classification_YOLO_model_path:
+  - classification\object_detect\runs\中国象棋\best.pt
+
+# 夹爪张开的角度，张太大会碰到旁边的子，单位度
+gripper_open_degree: 30
+
+# 夹爪朝向固定角度，以棋盘对角线方向抓，防止碰到旁边的棋子，单位度
+gripper_direction_degree: 45

@@ -1,11 +1,11 @@
-# Description: 调用目标识别和机械臂控制，实现抓取功能。
+# Description: 调用目标识别和机械臂控制，抓取和放置棋子。
 import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from arm.arm_control import Arm
 import numpy as np
-from object_detect.detect import (
+from classification.object_detect.detect import (
     detect_objects_in_frame,
     load_model,
     draw_box,

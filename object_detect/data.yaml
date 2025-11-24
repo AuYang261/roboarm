@@ -1,4 +1,4 @@
-path: /home/xjy/wowrobot/wowrobo/classification/dataset_process/dataset
+path: /home/xjy/wowrobot/wowrobo/object_detect/dataset_process/dataset
 train: images/train
 val: images/val
 
