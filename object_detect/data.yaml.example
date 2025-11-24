@@ -1,17 +1,12 @@
-path: /home/xjy/wowrobot/wowrobo/object_detect/dataset_process/dataset
+path: /home/roboarm/object_detect/dataset_process/dataset
 train: images/train
 val: images/val
 
 names: 
-  0: white_chess
-  1: black_chess
-  2: red_block
-  3: blue_block
-  4: gray_block
-  5: black_screw
-  6: black_block
-  7: white_block
-nc: 8
+  0: red_block
+  1: blue_block
+  2: yellow_block
+nc: 3
 
 # 数据增强参数，见https://docs.ultralytics.com/zh/guides/yolo-data-augmentation/
 
