@@ -49,7 +49,7 @@ class_pos:
     - 0
 
 # 离放置位置多近时无需抓取，以免反复抓放，单位米
-place_distance_threshold: 0.07
+place_distance_threshold: 0.05
 
 # 抓取时为避免刚好顶到物体，夹爪向外偏移一些的距离，单位米
 catch_offset: 0.01
