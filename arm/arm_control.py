@@ -14,6 +14,8 @@ from typing import Union, List
 import kinpy
 import numpy as np
 import yaml
+from scipy.spatial.transform import Rotation as R
+from scipy.optimize import minimize
 
 
 class Arm:
@@ -56,6 +58,7 @@ class Arm:
         if port is None:
             raise ValueError("配置文件中没有设置机械臂端口号 arm_port")
         self.steps = steps
+        self.position_weight, self.rotation_weight = 50, 1
         # 这个offset是用来修正机械臂零位的，目前不知道为什么舵机全零位置不是机械臂的零位
         # 所以每次重新标定或在新机械臂上需要重新测量这个offset
         # 方法见 arm/calibrate.py
@@ -209,14 +212,22 @@ class Arm:
         goal_tf = kinpy.Transform(
             pos=np.array(pos), rot=[0, 0, -rot_rad if rot_rad else 0]
         )
-        angles_deg = np.rad2deg(self.chain.inverse_kinematics(goal_tf)).tolist()
-        # forward_pos: kinpy.Transform = self.chain.forward_kinematics(
-        #     np.deg2rad(angles_deg).tolist()
-        # )  # type: ignore
-        # # 检查逆运动学解是否正确
-        # if np.linalg.norm(forward_pos.pos - np.array(pos)) > 0.01:
-        #     print("无法到达指定位置")
-        #     # return None
+        angles_deg = minimize(
+            self._ik_cost_function,
+            x0=np.zeros(len(self.chain.get_joint_parameter_names())),  # 初始猜测
+            args=(
+                goal_tf.matrix(),
+                self.chain,
+                self.position_weight,
+                self.rotation_weight,
+            ),
+            method="SLSQP",  # 一种支持约束的优化算法
+        )
+        if not angles_deg.success:
+            print("无法到达指定位置")
+            return None
+        else:
+            angles_deg = np.rad2deg(angles_deg.x).tolist()
         if not self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg):
             return None
         return self.get_arm_angles()
@@ -394,6 +405,32 @@ class Arm:
         self.move_to_home(gripper_angle_deg=80)
         return True
 
+    @staticmethod
+    def _ik_cost_function(
+        joint_angles, target_pose_matrix, chain, position_weight, rotation_weight
+    ):
+        """
+        定义一个带权重的代价函数。
+        """
+        # 计算当前关节角度下的末端位姿
+        current_fk = chain.forward_kinematics(joint_angles)
+        current_pose_matrix = current_fk.matrix()
+
+        # 计算位置误差 (欧氏距离的平方)
+        pos_error = np.linalg.norm(
+            (current_pose_matrix[:3, 3] - target_pose_matrix[:3, 3])
+        )
+
+        # 计算姿态误差
+        rot_error = (
+            R.from_matrix(current_pose_matrix[:3, :3])
+            * R.from_matrix(target_pose_matrix[:3, :3]).inv()
+        ).magnitude()
+
+        # 返回加权总误差
+        total_cost = (position_weight * pos_error) + (rotation_weight * rot_error)
+        return total_cost
+
 
 if __name__ == "__main__":
     arm = Arm()
@@ -411,6 +448,10 @@ if __name__ == "__main__":
     arm.move_to_home()
     time.sleep(1)
     arm.move_to([0.1, 0.1, 0.1])
+    time.sleep(1)
+    arm.move_to_home()
+    time.sleep(1)
+    arm.move_to([0.2, 0.2, 0.17])
     time.sleep(1)
     arm.move_to_home()
     time.sleep(1)
