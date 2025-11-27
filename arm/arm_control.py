@@ -1,12 +1,9 @@
 # Description: 机械臂控制封装
 from collections.abc import Sequence
 from math import inf
-from re import S
 import sys
 import os
 import time
-
-from flask.cli import F
 
 sys.path.append(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "lerobot/src/")
@@ -37,7 +34,6 @@ class Arm:
     ):
         """
         初始化机械臂
-        port: 机械臂串口号
         calibration_dir: 标定文件夹路径，包含机械臂offset文件
         id: 机械臂型号，默认"koch_follower"
         hand_eye_calibration_file: 手眼标定文件路径，默认"hand-eye-data/2d_homography.npy"
@@ -142,7 +138,11 @@ class Arm:
                         if motor_index < len(self.offset)
                         else 0
                     )
-                self.arm.send_action(interp_action)
+                try:
+                    self.arm.send_action(interp_action)
+                except Exception as e:
+                    print(f"设置机械臂角度失败: {e}")
+                    return False
                 time.sleep(0.5 / self.steps)
         return True
 
@@ -210,6 +210,13 @@ class Arm:
             pos=np.array(pos), rot=[0, 0, -rot_rad if rot_rad else 0]
         )
         angles_deg = np.rad2deg(self.chain.inverse_kinematics(goal_tf)).tolist()
+        # forward_pos: kinpy.Transform = self.chain.forward_kinematics(
+        #     np.deg2rad(angles_deg).tolist()
+        # )  # type: ignore
+        # # 检查逆运动学解是否正确
+        # if np.linalg.norm(forward_pos.pos - np.array(pos)) > 0.01:
+        #     print("无法到达指定位置")
+        #     # return None
         if not self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg):
             return None
         return self.get_arm_angles()
@@ -302,7 +309,7 @@ class Arm:
         target_x: float,
         target_y: float,
         target_z: float,
-        rad: float,
+        rad: float = 0,
     ):
         """
         机械臂放置物体到指定位置
@@ -357,9 +364,10 @@ class Arm:
         self,
         target_x: float,
         target_y: float,
-        rad: float,
+        catch_rotate_rad: float,
         place_pos: list[float | int] = [0.2, 0.0],
         height: float = inf,
+        place_rotate_rad: float = 0,
     ):
         """
         机械臂抓取物体并放到初始位置
@@ -376,10 +384,11 @@ class Arm:
         else:
             print("放置位置格式错误，应该是[x, y]或[x, y, z]")
             return False
-        if not self.catch(target_x, target_y, rad, height=height):
+        if not self.catch(target_x, target_y, catch_rotate_rad, height=height):
             self.move_to_home(gripper_angle_deg=80)
             return False
-        if not self.place(place_x, place_y, place_z, rad):
+        self.move_to_home()
+        if not self.place(place_x, place_y, place_z, place_rotate_rad):
             self.move_to_home(gripper_angle_deg=80)
             return False
         self.move_to_home(gripper_angle_deg=80)

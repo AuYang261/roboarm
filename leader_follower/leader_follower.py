@@ -26,7 +26,7 @@ def main():
         help="Path to the follower left arm calibration file",
     )
     args = parser.parse_args()
-    
+
     # 从 config.yaml 读取端口信息
     config = None
     with open("config.yaml", "r", encoding="utf-8") as f:
@@ -34,12 +34,15 @@ def main():
     if config is None:
         print("Failed to load config.yaml")
         return
-    leader_left_port = config.get("leader_port", "COM1")
-    follower_left_port = config.get("arm_port", "COM2")
+    leader_left_port = config.get("leader_port", None)
+    if leader_left_port is None:
+        raise ValueError("配置文件中没有设置主机械臂端口号 leader_port")
+    follower_left_port = config.get("arm_port", None)
+    if follower_left_port is None:
+        raise ValueError("配置文件中没有设置从机械臂端口号 arm_port")
 
     leader_arm_path = args.calibration_left_path
     follower_arm_path = args.follower_left_path
-    
 
     norm_mode_body = MotorNormMode.DEGREES
     leader_arm_left = DynamixelMotorsBus(

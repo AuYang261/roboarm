@@ -6,7 +6,8 @@
 from collections.abc import Sequence
 import sys
 import os
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -21,6 +22,7 @@ import numpy as np
 import kinpy
 import time
 import threading
+
 
 def read_urdf(urdf_content: str) -> kinpy.chain.SerialChain:
     chain = kinpy.build_serial_chain_from_urdf(urdf_content, "gripper_static_1")
@@ -126,36 +128,37 @@ def calibrate_2d(
     return M
 
 
-def test_homography(chain: kinpy.chain.SerialChain, M, image_point, z=0.07):
-
-    arm = Arm()
-    arm.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=None)
-    time.sleep(2)
-
-    """测试单应性矩阵"""
-    z = 0.1
-    image_point_homogeneous = np.array([image_point[0], image_point[1], 1.0])
-    robot_point_homogeneous = M @ image_point_homogeneous
-    robot_point = robot_point_homogeneous[:2] / robot_point_homogeneous[2]
-    angles_deg = np.rad2deg(
-        chain.inverse_kinematics(
-            kinpy.Transform(
-                pos=np.array([robot_point[0], robot_point[1], z]), rot=[0, 0, 0]
-            )
-        )
-    )
-    print(
-        f"测试点 {image_point} 对应机械臂末端位置 {robot_point}, 逆解关节角度 {angles_deg}"
-    )
-    arm.set_arm_angles(angles_deg.tolist(), gripper_angle_deg=80)
-    time.sleep(2)
-
-    # 下降
+def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
     config_path: str = os.path.join(
         os.path.dirname(os.path.dirname(__file__)), "config.yaml"
     )
     config_yaml = yaml.safe_load(open(config_path, "r", encoding="utf-8"))
-    z = config_yaml.get("default_desktop_height", 0.075)
+
+    gripper_open_degree = config_yaml.get("gripper_open_degree", 80)
+
+    arm = Arm()
+    arm.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=None)
+    time.sleep(1)
+
+    """测试单应性矩阵"""
+    image_point_homogeneous = np.array([image_point[0], image_point[1], 1.0])
+    robot_point_homogeneous = M @ image_point_homogeneous
+    robot_point = robot_point_homogeneous[:2] / robot_point_homogeneous[2]
+    angles_deg_up = np.rad2deg(
+        chain.inverse_kinematics(
+            kinpy.Transform(
+                pos=np.array([robot_point[0], robot_point[1], 0.1]), rot=[0, 0, 0]
+            )
+        )
+    )
+    print(
+        f"测试点 {image_point} 对应机械臂末端位置 {robot_point}, 逆解关节角度 {angles_deg_up}"
+    )
+    arm.set_arm_angles(angles_deg_up.tolist(), gripper_angle_deg=gripper_open_degree)
+    time.sleep(1)
+
+    # 下降
+    z = config_yaml.get("default_desktop_height")
     angles_deg = np.rad2deg(
         chain.inverse_kinematics(
             kinpy.Transform(
@@ -166,12 +169,12 @@ def test_homography(chain: kinpy.chain.SerialChain, M, image_point, z=0.07):
     print(
         f"测试点 {image_point} 对应机械臂末端位置 {robot_point}, 逆解关节角度 {angles_deg}"
     )
-    arm.set_arm_angles(angles_deg.tolist(), gripper_angle_deg=80)
-    time.sleep(2)
+    arm.set_arm_angles(angles_deg.tolist(), gripper_angle_deg=gripper_open_degree)
+    time.sleep(1)
 
     # 归0
     arm.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=None)
-    time.sleep(2)
+    time.sleep(1)
     arm.disconnect_arm()
 
 
@@ -179,8 +182,7 @@ def main():
     argparser = argparse.ArgumentParser(description="机械臂手眼标定2D版")
     argparser.add_argument("--mode", type=str, default="calibrate", help="模式")
     args = argparser.parse_args()
-    
-    
+
     image_points_path = os.path.join(
         os.path.dirname(__file__), "hand-eye-data", "2d_image_points.npy"
     )
@@ -238,7 +240,9 @@ def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
         if event == cv2.EVENT_LBUTTONDOWN:  # 左键点击
             print(f"Left button clicked at ({x}, {y})")
             # 创建一个线程去执行移动函数
-            threading.Thread(target=test_homography, args=(chain, homography_matrix, (x, y))).start()
+            threading.Thread(
+                target=test_homography, args=(chain, homography_matrix, (x, y))
+            ).start()
 
     # 获取2d坐标 创建窗口并绑定鼠标回调函数
     window_name = "Camera"

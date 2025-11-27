@@ -11,9 +11,7 @@ import yaml
 class_names = list(
     yaml.safe_load(
         open(
-            os.path.join(
-                os.path.dirname(os.path.dirname(__file__)), "object_detect", "data.yaml"
-            ),
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), "data.yaml"),
             "r",
         )
     )["names"].values()

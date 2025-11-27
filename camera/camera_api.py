@@ -2,9 +2,6 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from camera import orb_camera
-from camera import orb_camera_client
-
 import cv2
 import yaml
 
@@ -13,8 +10,6 @@ class Camera:
 
     def __init__(
         self,
-        ip: str = "",
-        port: int | None = None,
         color: bool = True,
         depth: bool = False,
     ):
@@ -24,29 +19,31 @@ class Camera:
                 encoding="utf-8",
             )
         )
-        self.ip = ip
-        self.port = port
+        self.ip = config.get("camera_ip", "")
+        self.port = config.get("camera_port", None)
         self.color = color
         self.depth = depth
         self.pipeline = None
         self.cap_rgb = None
         self.cap_depth = None
         if not self.ip:
-            self.ip = config.get("camera_ip", "")
-        if self.port is None:
-            self.port = config.get("camera_port", None)
-        if not self.ip:
-            self.pipeline = orb_camera.open_camera(self.color, self.depth)
+            from camera import orb_camera
+
+            self.orb_camera = orb_camera
+            self.pipeline = self.orb_camera.open_camera(self.color, self.depth)
         else:
             if self.port is None:
                 raise ValueError("未指定远程相机端口号")
-            self.cap_rgb, self.cap_depth = orb_camera_client.open_orb_web_camera(
+            from camera import orb_camera_client
+
+            self.orb_camera_client = orb_camera_client
+            self.cap_rgb, self.cap_depth = self.orb_camera_client.open_orb_web_camera(
                 self.ip, self.port, self.color, self.depth
             )
 
     def get_frames(self) -> dict:
         if not self.ip:
-            return orb_camera.get_frames(self.pipeline)
+            return self.orb_camera.get_frames(self.pipeline)
         else:
             frame_rgb = None
             frame_depth = None
@@ -59,9 +56,9 @@ class Camera:
 
     def close(self):
         if not self.ip:
-            orb_camera.close_camera(self.pipeline)
+            self.orb_camera.close_camera(self.pipeline)
         else:
-            orb_camera_client.close_orb_web_camera(self.cap_rgb, self.cap_depth)
+            self.orb_camera_client.close_orb_web_camera(self.cap_rgb, self.cap_depth)
 
 
 def main():
