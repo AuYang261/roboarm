@@ -21,3 +21,4 @@ cmd
 !docs/*
 
 config.yaml
+object_detect/data.yaml
