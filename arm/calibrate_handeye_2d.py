@@ -6,7 +6,8 @@
 from collections.abc import Sequence
 import sys
 import os
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
+
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -21,6 +22,7 @@ import numpy as np
 import kinpy
 import time
 import threading
+
 
 def read_urdf(urdf_content: str) -> kinpy.chain.SerialChain:
     chain = kinpy.build_serial_chain_from_urdf(urdf_content, "gripper_static_1")
@@ -170,26 +172,6 @@ def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
     arm.set_arm_angles(angles_deg.tolist(), gripper_angle_deg=gripper_open_degree)
     time.sleep(1)
 
-    # 抓取
-    arm.set_arm_angles(gripper_angle_deg=0)
-    time.sleep(1)
-
-    # 提起
-    arm.set_arm_angles(angles_deg_up.tolist(), gripper_angle_deg=0)
-    time.sleep(1)
-
-    # 放下
-    arm.set_arm_angles(angles_deg.tolist(), gripper_angle_deg=0)
-    time.sleep(1)
-
-    # 松开
-    arm.set_arm_angles(angles_deg.tolist(), gripper_angle_deg=gripper_open_degree)
-    time.sleep(1)
-
-    # 抬起
-    arm.set_arm_angles(angles_deg_up.tolist())
-    time.sleep(1)
-
     # 归0
     arm.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=None)
     time.sleep(1)
@@ -198,7 +180,7 @@ def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
 
 def main():
     argparser = argparse.ArgumentParser(description="机械臂手眼标定2D版")
-    argparser.add_argument("--mode", type=str, default="test", help="模式")
+    argparser.add_argument("--mode", type=str, default="calibrate", help="模式")
     args = argparser.parse_args()
 
     image_points_path = os.path.join(
@@ -258,7 +240,9 @@ def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
         if event == cv2.EVENT_LBUTTONDOWN:  # 左键点击
             print(f"Left button clicked at ({x}, {y})")
             # 创建一个线程去执行移动函数
-            threading.Thread(target=test_homography, args=(chain, homography_matrix, (x, y))).start()
+            threading.Thread(
+                target=test_homography, args=(chain, homography_matrix, (x, y))
+            ).start()
 
     # 获取2d坐标 创建窗口并绑定鼠标回调函数
     window_name = "Camera"
