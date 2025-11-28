@@ -47,6 +47,8 @@ class Arm:
             )
         self.config_yaml = yaml.safe_load(open(config_path, "r", encoding="utf-8"))
         self.desktop_height = self.config_yaml.get("default_desktop_height", 0.075)
+        self.catch_raise_height = self.config_yaml.get("catch_raise_height", 0.1)
+        self.place_raise_height = self.config_yaml.get("place_raise_height", 0.1)
         self.default_gripper_close_threshold = self.config_yaml.get(
             "default_gripper_close_threshold", 3
         )
@@ -266,7 +268,7 @@ class Arm:
 
         # 移动机械臂到目标位置上方
         res = self.move_to(
-            [target_x, target_y, height + 0.1],
+            [target_x, target_y, height + self.catch_raise_height],
             gripper_angle_deg=80,
             rot_rad=rad,
             warning=False,
@@ -295,7 +297,7 @@ class Arm:
 
         # 抬起物体
         res = self.move_to(
-            [target_x, target_y, height + 0.1],
+            [target_x, target_y, height + self.catch_raise_height],
             gripper_angle_deg=0,
             rot_rad=rad,
             warning=False,
@@ -343,7 +345,7 @@ class Arm:
 
         # 下降到目标位置
         res = self.move_to(
-            [target_x, target_y, target_z],
+            [target_x, target_y, target_z + + self.place_raise_height],
             gripper_angle_deg=0,
             rot_rad=rad,
         )
@@ -359,7 +361,7 @@ class Arm:
 
         # 抬起机械臂
         res = self.move_to(
-            [target_x, target_y, target_z + 0.1],
+            [target_x, target_y, target_z + + self.place_raise_height],
             gripper_angle_deg=80,
             rot_rad=rad,
             warning=False,
