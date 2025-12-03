@@ -27,14 +27,12 @@ def main():
     )
     model_paths = [
         os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
-        for path in config_yaml.get("classification_YOLO_model_path", [])
+        for path in config_yaml.get("chinese_chess_YOLO_model_path", [])
     ]
     default_gripper_aside_pos = config_yaml.get(
         "default_gripper_aside_pos", [0.1, 0.0, 0.12]
     )
-    default_conf_thres = config_yaml.get("default_conf_thres", 0.8)
-    class_pos = config_yaml.get("class_pos", {})
-    place_distance_threshold = config_yaml.get("place_distance_threshold", 0.03)
+    default_conf_thres = config_yaml.get("chinese_chess_default_conf_thres", 0.8)
     offset = config_yaml.get("catch_offset", 0.00)
 
     arm = Arm()
@@ -91,25 +89,14 @@ def main():
                     if gripper_angle_rad > np.pi / 2:
                         gripper_angle_rad -= np.pi
 
-                    if (
-                        np.linalg.norm(
-                            np.array(class_pos.get(class_name, [-0.2, 0.0]))
-                            - np.array([target_x, target_y])
-                        )
-                        < place_distance_threshold
-                    ):
-                        print(
-                            f"Object {class_name} is too close to place position, skipping catch."
-                        )
-                    else:
-                        future = executor.submit(
-                            arm.catch_and_place,
-                            # 夹爪向外偏移一些，避免刚好顶到物体
-                            target_x + offset * np.cos(gripper_angle_rad),
-                            target_y + offset * np.sin(-gripper_angle_rad),
-                            gripper_angle_rad,
-                            class_pos.get(class_name, [-0.2, 0.0]),
-                        )
+                    future = executor.submit(
+                        arm.catch_and_place,
+                        # 夹爪向外偏移一些，避免刚好顶到物体
+                        target_x + offset * np.cos(gripper_angle_rad),
+                        target_y + offset * np.sin(-gripper_angle_rad),
+                        gripper_angle_rad,
+                        [target_x, target_y],
+                    )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 
             if future is None or future.done():

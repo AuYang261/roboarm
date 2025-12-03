@@ -60,6 +60,7 @@ class Arm:
         if port is None:
             raise ValueError("配置文件中没有设置机械臂端口号 arm_port")
         self.steps = steps
+        # 逆运动学优化目标权重
         self.position_weight, self.rotation_weight = 50, 1
         # 这个offset是用来修正机械臂零位的，目前不知道为什么舵机全零位置不是机械臂的零位
         # 所以每次重新标定或在新机械臂上需要重新测量这个offset
@@ -214,6 +215,7 @@ class Arm:
         goal_tf = kinpy.Transform(
             pos=np.array(pos), rot=[0, 0, -rot_rad if rot_rad else 0]
         )
+        # 使用优化方法求解逆运动学
         angles_deg = minimize(
             self._ik_cost_function,
             x0=np.zeros(len(self.chain.get_joint_parameter_names())),  # 初始猜测
@@ -226,7 +228,7 @@ class Arm:
             method="SLSQP",  # 一种支持约束的优化算法
         )
         if not angles_deg.success:
-            print("无法到达指定位置")
+            print("逆运动学不收敛，无法到达指定位置")
             return None
         else:
             angles_deg = np.rad2deg(angles_deg.x).tolist()
