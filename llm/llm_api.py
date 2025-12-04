@@ -1,17 +1,18 @@
 import json
 import os
-from tkinter import W
 from turtle import width
-from click import prompt
-from openai import OpenAI
+from networkx import star_graph
+from openai.types.chat.chat_completion import ChatCompletion
+from openai import OpenAI, AsyncOpenAI
 import base64
 import time
 import yaml
 import toml
 from PIL import Image, ImageDraw, ImageFont
 import cv2
-from typing import Dict
 import numpy as np
+from typing import Any, Coroutine
+import asyncio
 
 
 class LLMAPI:
@@ -31,6 +32,10 @@ class LLMAPI:
             base_url=base_url,
             api_key=config_yaml["openrouter_api_key"],
         )
+        self.async_client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=config_yaml["openrouter_api_key"],
+        )
 
     def chat_img(
         self,
@@ -39,6 +44,7 @@ class LLMAPI:
         model: str = "google/gemini-3-pro-preview",
         debug: bool = False,
         schema_key: str | None = None,
+        temperature: float = 0.1,
     ) -> str | None:
         start_time = time.time()
         prompt = self.prompts.get(prompt_key, None)
@@ -66,7 +72,7 @@ class LLMAPI:
                     ],
                 }
             ],
-            temperature=0.1,
+            temperature=temperature,
             response_format=(
                 {"type": "json_object"}
                 if schema is None
@@ -83,6 +89,66 @@ class LLMAPI:
             return None
         return completion.choices[0].message.content
 
+    def chat_img_async(
+        self,
+        image_base64: str,
+        prompt_key: str,
+        model: str = "google/gemini-3-pro-preview",
+        debug: bool = False,
+        schema_key: str | None = None,
+        temperature: float = 0.1,
+    ) -> Coroutine[Any, Any, ChatCompletion] | None:
+        start_time = time.time()
+        prompt = self.prompts.get(prompt_key, None)
+        if prompt is None:
+            print(f"Prompt key '{prompt_key}' not found.")
+            return None
+        schema = None
+        if schema_key is not None:
+            schema = self.prompts.get(schema_key, None)
+            if schema is None:
+                print(f"Warning: Schema key '{schema_key}' not found.")
+        completion_coroutine = self.async_client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}"
+                            },
+                        },
+                    ],
+                }
+            ],
+            temperature=temperature,
+            response_format=(
+                {"type": "json_object"}
+                if schema is None
+                else {
+                    "type": "json_schema",
+                    "json_schema": {"name": "detection_output", "schema": schema},
+                }
+            ),
+        )
+        if debug:
+            print(f"Send time taken: {time.time() - start_time} seconds")
+        return completion_coroutine
+
+    def await_chat_coroutine(
+        self, coroutine: Coroutine[Any, Any, ChatCompletion]
+    ) -> str | None:
+        start_time = time.time()
+        completion = asyncio.run(coroutine)
+        print(f"Await time taken: {time.time() - start_time} seconds")
+        if completion.choices is None or len(completion.choices) == 0:
+            print("No choices returned from the model.")
+            return None
+        return completion.choices[0].message.content
+
 
 if __name__ == "__main__":
     llm_api = LLMAPI()
@@ -92,12 +158,15 @@ if __name__ == "__main__":
         image_base64 = base64.b64encode(image_file.read()).decode("utf-8")
     result = None
     while result is None:
-        result = llm_api.chat_img(
+        result_coroutine = llm_api.chat_img_async(
             image_base64,
             "block_detect_prompt",
             debug=True,
             schema_key="block_detect_prompt_json_schema",
         )
+        if result_coroutine is None:
+            continue
+        result = llm_api.await_chat_coroutine(result_coroutine)
         print(result)
     json_content = json.loads(result)
     img = Image.open(image_path)
