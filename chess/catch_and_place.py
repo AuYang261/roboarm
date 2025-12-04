@@ -29,11 +29,9 @@ def main():
         os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
         for path in config_yaml.get("chinese_chess_YOLO_model_path", [])
     ]
-    default_gripper_aside_pos = config_yaml.get(
-        "default_gripper_aside_pos", [0.1, 0.0, 0.12]
-    )
-    default_conf_thres = config_yaml.get("chinese_chess_default_conf_thres", 0.8)
-    offset = config_yaml.get("catch_offset", 0.00)
+    default_gripper_aside_pos = config_yaml["default_gripper_aside_pos"]
+    default_conf_thres = config_yaml["chinese_chess_default_conf_thres"]
+    offset = config_yaml["catch_offset"]
 
     arm = Arm()
     arm.move_to_home(gripper_angle_deg=80)

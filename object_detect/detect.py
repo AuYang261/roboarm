@@ -60,7 +60,7 @@ def main():
         os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
         for path in config_yaml.get("classification_YOLO_model_path", [])
     ]
-    default_conf_thres = config_yaml.get("default_conf_thres", 0.8)
+    default_conf_thres = config_yaml["default_conf_thres"]
 
     # Load model
     model = load_model(model_paths[0])

@@ -46,27 +46,25 @@ class Arm:
                 f"找不到配置文件，请按 {config_path}.example 创建配置文件{config_path}"
             )
         self.config_yaml = yaml.safe_load(open(config_path, "r", encoding="utf-8"))
-        self.desktop_height = self.config_yaml.get("default_desktop_height", 0.075)
+        self.desktop_height = self.config_yaml["default_desktop_height"]
         self.catch_raise_height = self.config_yaml.get("catch_raise_height", 0.1)
         self.place_raise_height = self.config_yaml.get("place_raise_height", 0.1)
-        self.default_gripper_close_threshold = self.config_yaml.get(
-            "default_gripper_close_threshold", 3
-        )
-        self.catch_time_interval_s = self.config_yaml.get("catch_time_interval_s", 0.1)
-        self.get_arm_angles_retry_times = self.config_yaml.get(
-            "get_arm_angles_retry_times", 3
-        )
-        port = self.config_yaml.get("arm_port", None)
-        if port is None:
-            raise ValueError("配置文件中没有设置机械臂端口号 arm_port")
+        self.default_gripper_close_threshold = self.config_yaml[
+            "default_gripper_close_threshold"
+        ]
+        self.catch_time_interval_s = self.config_yaml["catch_time_interval_s"]
+        self.get_arm_angles_retry_times = self.config_yaml.get[
+            "get_arm_angles_retry_times"
+        ]
+        port = self.config_yaml["arm_port"]
         self.steps = steps
         # 逆运动学优化目标权重
         self.position_weight, self.rotation_weight = 50, 1
         # 这个offset是用来修正机械臂零位的，目前不知道为什么舵机全零位置不是机械臂的零位
         # 所以每次重新标定或在新机械臂上需要重新测量这个offset
         # 方法见 arm/calibrate.py
-        self.offset = self.config_yaml.get("arm_offset", None)
-        if self.offset is None or len(self.offset) != 5:
+        self.offset = self.config_yaml["arm_offset"]
+        if len(self.offset) != 5:
             raise ValueError(
                 "配置文件中没有正确设置机械臂offset arm_offset, 应该是5个关节的角度列表"
                 "运行arm/calibrate.py以获取arm_offset"

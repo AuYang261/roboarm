@@ -1,24 +1,57 @@
+import json
 import os
+from tkinter import W
+from turtle import width
+from click import prompt
 from openai import OpenAI
 import base64
-import requests
-import json
-import random
 import time
+import yaml
+import toml
 from PIL import Image, ImageDraw, ImageFont
+import cv2
+from typing import Dict
+import numpy as np
 
 
 class LLMAPI:
-    def __init__(self, api_key: str, base_url: str = "https://openrouter.ai/api/v1"):
+
+    def __init__(self, base_url: str = "https://openrouter.ai/api/v1"):
+        config_yaml = yaml.safe_load(
+            open(
+                os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml"),
+                encoding="utf-8",
+            )
+        )
+        prompts_file = config_yaml["prompts_file"]
+        self.prompts = toml.load(
+            os.path.join(os.path.dirname(os.path.dirname(__file__)), prompts_file)
+        )["prompts"]
         self.client = OpenAI(
             base_url=base_url,
-            api_key=api_key,
+            api_key=config_yaml["openrouter_api_key"],
         )
 
-    def generate_image_description(self, image_url: str, prompt: str) -> str | None:
+    def chat_img(
+        self,
+        image_base64: str,
+        prompt_key: str,
+        model: str = "google/gemini-3-pro-preview",
+        debug: bool = False,
+        schema_key: str | None = None,
+    ) -> str | None:
         start_time = time.time()
+        prompt = self.prompts.get(prompt_key, None)
+        if prompt is None:
+            print(f"Prompt key '{prompt_key}' not found.")
+            return None
+        schema = None
+        if schema_key is not None:
+            schema = self.prompts.get(schema_key, None)
+            if schema is None:
+                print(f"Warning: Schema key '{schema_key}' not found.")
         completion = self.client.chat.completions.create(
-            model="google/gemini-3-pro-preview",
+            model=model,
             messages=[
                 {
                     "role": "user",
@@ -26,12 +59,59 @@ class LLMAPI:
                         {"type": "text", "text": prompt},
                         {
                             "type": "image_url",
-                            "image_url": {"url": image_url},
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_base64}"
+                            },
                         },
                     ],
                 }
             ],
+            temperature=0.1,
+            response_format=(
+                {"type": "json_object"}
+                if schema is None
+                else {
+                    "type": "json_schema",
+                    "json_schema": {"name": "detection_output", "schema": schema},
+                }
+            ),
         )
-        end_time = time.time()
-        print(f"Time taken: {end_time - start_time} seconds")
+        if debug:
+            print(f"Time taken: {time.time() - start_time} seconds")
+        if completion.choices is None or len(completion.choices) == 0:
+            print("No choices returned from the model.")
+            return None
         return completion.choices[0].message.content
+
+
+if __name__ == "__main__":
+    llm_api = LLMAPI()
+
+    image_path = "object_detect/dataset_process/dataset/备份-双积木/img_012.png"
+    with open(image_path, "rb") as image_file:
+        image_base64 = base64.b64encode(image_file.read()).decode("utf-8")
+    result = None
+    while result is None:
+        result = llm_api.chat_img(
+            image_base64,
+            "block_detect_prompt",
+            debug=True,
+            schema_key="block_detect_prompt_json_schema",
+        )
+        print(result)
+    json_content = json.loads(result)
+    img = Image.open(image_path)
+    width, height = img.size
+    font = ImageFont.truetype(r"C:\Windows\Fonts\msyh.ttc", 16)
+    for item in json_content:
+        box = item.get("pos")
+        if box is None or len(box) != 2:
+            continue
+        label = item.get("label", "unknown")
+        x_mid, y_mid = box["x_mid"], box["y_mid"]
+        draw = ImageDraw.Draw(img)
+        draw.circle((x_mid * width, y_mid * height), radius=5, fill="red")
+        draw.text((x_mid * width + 5, y_mid * height - 5), label, fill="red", font=font)
+    cv2.imshow("result", cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR))
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
