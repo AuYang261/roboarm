@@ -41,7 +41,7 @@ class Camera:
                 self.ip, self.port, self.color, self.depth
             )
 
-    def get_frames(self) -> dict:
+    def get_frames(self) -> dict[str, cv2.typing.MatLike | None]:
         if not self.ip:
             return self.orb_camera.get_frames(self.pipeline)
         else:

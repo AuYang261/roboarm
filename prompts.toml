@@ -4,10 +4,11 @@ block_detect_prompt = """
 你是图像物体检测的专家。给定一张图片，识别图像中存在的物体，并以结构化的JSON格式提供它们的详细信息。
 请分析图片并返回一个JSON数组，其中每个元素包含以下字段，表示每个检测到的物体：
 - "id"：检测到的物体的唯一标识符。
-- "label"：检测到的物体的名称（例如：“树干”、“树叶”）。
-- "pos"：包含检测到的物体中心点坐标的对象，具有以下字段：
-  - "x_mid": 物体中心点x坐标
-  - "y_mid": 物体中心点y坐标。
+- "class_name"：检测到的物体的名称（例如：“树干”、“树叶”）。
+- "box_center_x"：物体边界框中心点的x坐标，范围0-1之间。
+- "box_center_y"：物体边界框中心点的y坐标，范围0-1之间。
+- "box_width"：物体边界框的宽度，范围0-1之间。
+- "box_height"：物体边界框的高度，范围0-1之间。
 其中坐标以左上角为原点，向右为x轴，向下为y轴，坐标范围0-1之间。
 仅提供JSON数组作为输出，不要添加任何额外的文本或解释，也不要有markdown等的格式。
 当前的常见物体标签包括但不限于：各种颜色的积木等。
@@ -15,41 +16,19 @@ block_detect_prompt = """
 [
   {
     "id": 1,
-    "label": "蓝色积木",
-    "pos": {
-      "x_mid": 0.12,
-      "y_mid": 0.27
-    }
+    "class_name": "蓝色积木",
+    "box_center_x": 0.51,
+    "box_center_y": 0.13,
+    "box_width": 0.12,
+    "box_height": 0.08
   },
   {
     "id": 2,
-    "label": "黄色积木",
-    "pos": {
-      "x_mid": 0.44,
-      "y_mid": 0.19
-    }
+    "class_name": "黄色积木",
+    "box_center_x": 0.31,
+    "box_center_y": 0.42,
+    "box_width": 0.10,
+    "box_height": 0.07
   }
 ]
-"""
-
-block_detect_prompt_json_schema = """
-{
-  "type": "array",
-  "items": {
-    "type": "object",
-    "properties": {
-      "id": { "type": "integer" },
-      "label": { "type": "string" },
-      "pos": {
-        "type": "object",
-        "properties": {
-          "x_mid": { "type": "number" },
-          "y_mid": { "type": "number" }
-        },
-        "required": ["x_mid", "y_mid"]
-      }
-    },
-    "required": ["id", "label", "pos"]
-  }
-}
 """
