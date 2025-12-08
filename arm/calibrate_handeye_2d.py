@@ -134,32 +134,16 @@ def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
     )
     config_yaml = yaml.safe_load(open(config_path, "r", encoding="utf-8"))
 
-    gripper_open_degree = config_yaml.get("gripper_open_degree", 80)
-
     arm = Arm()
-    arm.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=None)
+    arm.move_to_home(gripper_angle_deg=None)
     time.sleep(1)
 
     """测试单应性矩阵"""
     image_point_homogeneous = np.array([image_point[0], image_point[1], 1.0])
     robot_point_homogeneous = M @ image_point_homogeneous
     robot_point = robot_point_homogeneous[:2] / robot_point_homogeneous[2]
+    z = config_yaml.get("default_desktop_height", 0.075)
     angles_deg_up = np.rad2deg(
-        chain.inverse_kinematics(
-            kinpy.Transform(
-                pos=np.array([robot_point[0], robot_point[1], 0.1]), rot=[0, 0, 0]
-            )
-        )
-    )
-    print(
-        f"测试点 {image_point} 对应机械臂末端位置 {robot_point}, 逆解关节角度 {angles_deg_up}"
-    )
-    arm.set_arm_angles(angles_deg_up.tolist(), gripper_angle_deg=gripper_open_degree)
-    time.sleep(1)
-
-    # 下降
-    z = config_yaml.get("default_desktop_height")
-    angles_deg = np.rad2deg(
         chain.inverse_kinematics(
             kinpy.Transform(
                 pos=np.array([robot_point[0], robot_point[1], z]), rot=[0, 0, 0]
@@ -167,13 +151,13 @@ def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
         )
     )
     print(
-        f"测试点 {image_point} 对应机械臂末端位置 {robot_point}, 逆解关节角度 {angles_deg}"
+        f"测试点 {image_point} 对应机械臂末端位置 {robot_point}, 逆解关节角度 {angles_deg_up}"
     )
-    arm.set_arm_angles(angles_deg.tolist(), gripper_angle_deg=gripper_open_degree)
+    arm.set_arm_angles(angles_deg_up.tolist())
     time.sleep(1)
 
     # 归0
-    arm.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=None)
+    arm.move_to_home(gripper_angle_deg=None)
     time.sleep(1)
     arm.disconnect_arm()
 

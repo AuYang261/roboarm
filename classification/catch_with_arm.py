@@ -29,13 +29,11 @@ def main():
         os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
         for path in config_yaml.get("classification_YOLO_model_path", [])
     ]
-    default_gripper_aside_pos = config_yaml.get(
-        "default_gripper_aside_pos", [0.1, 0.0, 0.12]
-    )
-    default_conf_thres = config_yaml.get("default_conf_thres", 0.8)
-    class_pos = config_yaml.get("class_pos", {})
-    place_distance_threshold = config_yaml.get("place_distance_threshold", 0.03)
-    offset = config_yaml.get("catch_offset", 0.00)
+    default_gripper_aside_pos = config_yaml["default_gripper_aside_pos"]
+    default_conf_thres = config_yaml["default_conf_thres"]
+    class_pos = config_yaml["class_pos"]
+    place_distance_threshold = config_yaml["place_distance_threshold"]
+    offset = config_yaml["catch_offset"]
 
     arm = Arm()
     arm.move_to_home(gripper_angle_deg=80)

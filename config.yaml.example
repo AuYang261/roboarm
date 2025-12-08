@@ -26,6 +26,14 @@ default_gripper_aside_pos:
   - 0.0
   - 0.12
 
+# =======大模型=======
+
+# openrouter的api_key
+openrouter_api_key: ****
+
+# 提示词文件
+prompts_file: prompts.toml
+
 # =======物品分类场景=======
 
 # 以项目根目录为基准
