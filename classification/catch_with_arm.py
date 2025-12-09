@@ -65,30 +65,9 @@ def main():
                 if future is None or future.done():
                     # 将图像坐标转换为机械臂坐标系
                     target_x, target_y = arm.pixel2pos(u, v)
-                    box_points = cv2.boxPoints(((u, v), (w, h), angle_deg))
-                    # 计算较长边的两顶点
-                    if np.linalg.norm(box_points[0] - box_points[1]) > np.linalg.norm(
-                        box_points[1] - box_points[2]
-                    ):
-                        box_points = (
-                            [box_points[0], box_points[1]]
-                            if box_points[0][0] < box_points[1][0]
-                            else [box_points[1], box_points[0]]
-                        )
-                    else:
-                        box_points = (
-                            [box_points[1], box_points[2]]
-                            if box_points[1][0] < box_points[2][0]
-                            else [box_points[2], box_points[1]]
-                        )
-                    # gripper_angle_rad 沿着物体长边方向，在[-pi/2, pi/2]范围内
-                    gripper_angle_rad = np.pi / 2 + np.arctan2(
-                        box_points[1][1] - box_points[0][1],
-                        box_points[1][0] - box_points[0][0],
+                    gripper_angle_rad = arm.gripper_angle_by_longer(
+                        u, v, w, h, angle_deg
                     )
-                    if gripper_angle_rad > np.pi / 2:
-                        gripper_angle_rad -= np.pi
-
                     if (
                         np.linalg.norm(
                             np.array(class_pos.get(class_name, [-0.2, 0.0]))

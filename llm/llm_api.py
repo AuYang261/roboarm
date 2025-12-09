@@ -48,6 +48,7 @@ class LLMAPI:
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
         self._loop_thread.start()
+        self._start_times: dict[futures.Future, float] = {}
 
     def _run_loop(self):
         asyncio.set_event_loop(self._loop)
@@ -57,6 +58,7 @@ class LLMAPI:
         self,
         image_base64: str,
         prompt_key: str,
+        replace_map: dict[str, str] | None = None,
         model: str = "google/gemini-3-pro-preview",
         debug: bool = False,
         schema: dict[str, Any] | None = None,
@@ -67,6 +69,8 @@ class LLMAPI:
         if prompt is None:
             print(f"Prompt key '{prompt_key}' not found.")
             return None
+        for k, v in (replace_map or {}).items():
+            prompt = prompt.replace(k, v)
         completion = self.client.chat.completions.create(
             model=model,
             messages=[
@@ -104,16 +108,31 @@ class LLMAPI:
         self,
         image_base64: str,
         prompt_key: str,
-        model: str = "google/gemini-3-pro-preview",
+        replace_map: dict[str, str] | None = None,
+        model: str = "qwen/qwen3-vl-235b-a22b-instruct",
+        # model: str = "google/gemini-3-pro-preview",
         debug: bool = False,
         schema: dict[str, Any] | None = None,
         temperature: float = 0.1,
     ) -> "futures.Future[ChatCompletion] | None":
+        """
+        异步发送图片聊天请求，返回一个 Future 对象。
+        参数：
+        image_base64: 图片的 Base64 编码字符串。
+        prompt_key: 提示词toml文件中提示词的键值。
+        replace_map: 可选的字符串替换映射，用于动态修改提示词。
+        model: 使用的模型名称。
+        debug: 是否打印调试信息。
+        schema: 可选的 JSON schema，用于验证返回结果格式，示例见下方的demo。
+        temperature: 采样温度参数。
+        """
         start_time = time.time()
         prompt = self.prompts.get(prompt_key, None)
         if prompt is None:
             print(f"Prompt key '{prompt_key}' not found.")
             return None
+        for k, v in (replace_map or {}).items():
+            prompt = prompt.replace(k, v)
         completion_coroutine = self.async_client.chat.completions.create(
             model=model,
             messages=[
@@ -142,10 +161,12 @@ class LLMAPI:
         )
         if debug:
             print(f"Send time taken: {time.time() - start_time} seconds")
-        return asyncio.run_coroutine_threadsafe(completion_coroutine, self._loop)
+        future = asyncio.run_coroutine_threadsafe(completion_coroutine, self._loop)
+        self._start_times[future] = start_time
+        return future
 
-    @staticmethod
     def await_task(
+        self,
         task: "futures.Future[ChatCompletion]",
         blocking: bool = False,
     ) -> tuple[str | None, bool]:
@@ -155,13 +176,27 @@ class LLMAPI:
         """
         if blocking:
             start_time = time.time()
-            completion = task.result()
+            try:
+                completion = task.result()
+            except Exception as e:
+                print(f"Error in task: {e}")
+                return None, True
             print(f"Await time taken: {time.time() - start_time} seconds")
         else:
             if not task.done():
                 return None, False
             else:
-                completion = task.result()
+                try:
+                    completion = task.result()
+                except Exception as e:
+                    print(f"Error in task: {e}")
+                    return None, True
+                finally:
+                    if task in self._start_times:
+                        print(
+                            f"Total time taken: {time.time() - self._start_times[task]} seconds"
+                        )
+                        del self._start_times[task]
         if completion.choices is None or len(completion.choices) == 0:
             print("No choices returned from the model.")
             return None, True

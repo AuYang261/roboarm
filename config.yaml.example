@@ -62,6 +62,12 @@ place_distance_threshold: 0.05
 # 抓取时为避免刚好顶到物体，夹爪向外偏移一些的距离，单位米
 catch_offset: 0.01
 
+# 抓取前抬起的高度，单位米
+catch_raise_height: 0.1
+
+# 放置前抬起的高度，单位米
+place_raise_height: 0.1
+
 # =======主从臂跟随场景=======
 
 leader_port: COM5

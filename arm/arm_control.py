@@ -4,6 +4,7 @@ from math import inf
 import sys
 import os
 import time
+import cv2
 
 sys.path.append(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "lerobot/src/")
@@ -53,13 +54,11 @@ class Arm:
             "default_gripper_close_threshold"
         ]
         self.catch_time_interval_s = self.config_yaml["catch_time_interval_s"]
-        self.get_arm_angles_retry_times = self.config_yaml.get[
-            "get_arm_angles_retry_times"
-        ]
+        self.get_arm_angles_retry_times = self.config_yaml["get_arm_angles_retry_times"]
         port = self.config_yaml["arm_port"]
         self.steps = steps
         # 逆运动学优化目标权重
-        self.position_weight, self.rotation_weight = 50, 1
+        self.position_weight, self.rotation_weight = 10, 1
         # 这个offset是用来修正机械臂零位的，目前不知道为什么舵机全零位置不是机械臂的零位
         # 所以每次重新标定或在新机械臂上需要重新测量这个offset
         # 方法见 arm/calibrate.py
@@ -234,12 +233,11 @@ class Arm:
             return None
         return self.get_arm_angles()
 
-    def pixel2pos(self, u: float, v: float):
+    def pixel2pos(self, u: float, v: float) -> tuple[float, float]:
         """
         将图像坐标转换为机械臂坐标系位置，单位米
         u, v: 图像坐标，单位像素
-        height: 目标物体高度，单位米，默认0.07米
-        返回值: [x, y, z]
+        返回值: x, y, 夹爪角度
         """
         if not hasattr(self, "hand_eye_calibration_matrix"):
             raise ValueError("没有手眼标定数据，无法转换图像坐标")
@@ -247,7 +245,42 @@ class Arm:
         world_coords = self.hand_eye_calibration_matrix @ pixel_coords
         world_coords /= world_coords[2]
         target_x, target_y = world_coords[0, 0], world_coords[1, 0]
-        return [target_x, target_y]
+        return target_x, target_y
+
+    def gripper_angle_by_longer(
+        self, u: float, v: float, w: float, h: float, angle_deg: float
+    ) -> float:
+        """
+        根据检测到的物体边界框，计算想沿较长边的方向抓取，夹爪应当采取的角度
+        u, v: 物体边界框中心点坐标，单位像素
+        w, h: 物体边界框宽高，单位像素
+        angle_deg: 物体边界框旋转角度，单位度
+        返回值: 夹爪角度，单位弧度
+        """
+        box_points = cv2.boxPoints(((u, v), (w, h), angle_deg))
+        # 计算较长边的两顶点
+        if np.linalg.norm(box_points[0] - box_points[1]) > np.linalg.norm(
+            box_points[1] - box_points[2]
+        ):
+            box_points = (
+                [box_points[0], box_points[1]]
+                if box_points[0][0] < box_points[1][0]
+                else [box_points[1], box_points[0]]
+            )
+        else:
+            box_points = (
+                [box_points[1], box_points[2]]
+                if box_points[1][0] < box_points[2][0]
+                else [box_points[2], box_points[1]]
+            )
+        # gripper_angle_rad 沿着物体长边方向，在[-pi/2, pi/2]范围内
+        gripper_angle_rad = np.pi / 2 + np.arctan2(
+            box_points[1][1] - box_points[0][1],
+            box_points[1][0] - box_points[0][0],
+        )
+        if gripper_angle_rad > np.pi / 2:
+            gripper_angle_rad -= np.pi
+        return gripper_angle_rad
 
     def catch(
         self,
@@ -332,7 +365,7 @@ class Arm:
 
         # 移动机械臂到目标位置上方
         res = self.move_to(
-            [target_x, target_y, target_z + 0.1],
+            [target_x, target_y, target_z + self.place_raise_height],
             gripper_angle_deg=0,
             rot_rad=rad,
             warning=False,
@@ -345,7 +378,7 @@ class Arm:
 
         # 下降到目标位置
         res = self.move_to(
-            [target_x, target_y, target_z + + self.place_raise_height],
+            [target_x, target_y, target_z],
             gripper_angle_deg=0,
             rot_rad=rad,
         )
@@ -361,7 +394,7 @@ class Arm:
 
         # 抬起机械臂
         res = self.move_to(
-            [target_x, target_y, target_z + + self.place_raise_height],
+            [target_x, target_y, target_z + self.place_raise_height],
             gripper_angle_deg=80,
             rot_rad=rad,
             warning=False,

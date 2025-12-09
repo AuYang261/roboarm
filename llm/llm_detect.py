@@ -10,6 +10,7 @@ import base64
 from openai.types.chat.chat_completion import ChatCompletion
 from concurrent import futures
 import numpy as np
+from typing import Any
 
 from llm.llm_api import LLMAPI, extract_json_from_markdown
 from llm.dataclass import DetectedBox, DetectedFromLLM
@@ -26,6 +27,8 @@ class LLMDetect:
     def detect_scene(
         self,
         prompt_key: str,
+        replace_map: dict[str, str] | None = None,
+        schema: dict[str, Any] | None = None,
     ) -> tuple["futures.Future[ChatCompletion]|None", cv2.typing.MatLike | None]:
         frames = self.camera.get_frames()
         color_frame = frames.get("color", None)
@@ -33,13 +36,16 @@ class LLMDetect:
             print("Failed to grab frame")
             return None, None
 
+        # 旋转180度以适应摄像头安装方向，需要根据实际安装情况调整
+        color_frame = cv2.rotate(color_frame, cv2.ROTATE_180)
         _, img_encoded = cv2.imencode(".jpg", color_frame)
         image_base64 = base64.b64encode(img_encoded.tobytes()).decode("utf-8")
 
         response_task = self.llm_api.chat_img_async(
             image_base64=image_base64,
             prompt_key=prompt_key,
-            schema=TypeAdapter(list[DetectedFromLLM]).json_schema(),
+            replace_map=replace_map,
+            schema=schema,
         )
         return response_task, color_frame
 
@@ -63,6 +69,17 @@ def draw_boxes_on_frame(
     return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
 
+def json2box(json_str: str, img_w: int, img_h: int) -> DetectedBox | None:
+    try:
+        box: DetectedFromLLM = TypeAdapter(DetectedFromLLM).validate_json(
+            extract_json_from_markdown(json_str)
+        )
+    except Exception as e:
+        print(f"解析/校验 JSON 失败: {e}")
+        return None
+    return box.to_detected_box(img_w, img_h) if not box.failed else None
+
+
 def json2boxes(json_str: str, img_w: int, img_h: int) -> list[DetectedBox]:
     try:
         boxes: list[DetectedFromLLM] = TypeAdapter(list[DetectedFromLLM]).validate_json(
@@ -71,7 +88,7 @@ def json2boxes(json_str: str, img_w: int, img_h: int) -> list[DetectedBox]:
     except Exception as e:
         print(f"解析/校验 JSON 失败: {e}")
         return []
-    return [item.to_detected_box(img_w, img_h) for item in boxes]
+    return [box.to_detected_box(img_w, img_h) for box in boxes if not box.failed]
 
 
 if __name__ == "__main__":
@@ -81,7 +98,9 @@ if __name__ == "__main__":
         response_task, frame = llm_detect.detect_scene(prompt_key="block_detect_prompt")
         if response_task and frame is not None:
             while True:
-                response, done = LLMAPI.await_task(response_task, blocking=False)
+                response, done = llm_detect.llm_api.await_task(
+                    response_task, blocking=False
+                )
                 if response:
                     boxes = json2boxes(
                         response, img_w=frame.shape[1], img_h=frame.shape[0]
