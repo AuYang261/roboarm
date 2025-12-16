@@ -6,6 +6,7 @@ runs/
 yolov11/
 
 *.txt
+.env
 !requirements.txt
 
 cmd
