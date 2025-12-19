@@ -31,6 +31,8 @@ class LLMDetect:
         schema: dict[str, Any] | None = None,
     ) -> tuple["futures.Future[ChatCompletion]|None", cv2.typing.MatLike | None]:
         frames = self.camera.get_frames()
+        for _ in range(10):
+            frames = self.camera.get_frames()
         color_frame = frames.get("color", None)
         if color_frame is None:
             print("Failed to grab frame")
@@ -77,7 +79,7 @@ def json2box(json_str: str, img_w: int, img_h: int) -> DetectedBox | None:
     except Exception as e:
         print(f"解析/校验 JSON 失败: {e}")
         return None
-    return box.to_detected_box(img_w, img_h) if not box.failed else None
+    return box.to_detected_box(img_w, img_h) if box.is_valid() else None
 
 
 def json2boxes(json_str: str, img_w: int, img_h: int) -> list[DetectedBox]:
@@ -88,14 +90,17 @@ def json2boxes(json_str: str, img_w: int, img_h: int) -> list[DetectedBox]:
     except Exception as e:
         print(f"解析/校验 JSON 失败: {e}")
         return []
-    return [box.to_detected_box(img_w, img_h) for box in boxes if not box.failed]
+    return [box.to_detected_box(img_w, img_h) for box in boxes if box.is_valid()]
 
 
 if __name__ == "__main__":
     llm_detect = LLMDetect()
     frame_draw = None
     while True:
-        response_task, frame = llm_detect.detect_scene(prompt_key="block_detect_prompt")
+        response_task, frame = llm_detect.detect_scene(
+            prompt_key="block_detect_prompt",
+            schema=TypeAdapter(list[DetectedFromLLM]).json_schema(),
+        )
         if response_task and frame is not None:
             while True:
                 response, done = llm_detect.llm_api.await_task(
