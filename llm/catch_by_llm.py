@@ -21,12 +21,14 @@ def main():
         )
     )
     offset = config_yaml["catch_offset"]
+    default_gripper_aside_pos = config_yaml["default_gripper_aside_pos"]
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     llm_detect = LLMDetect()
     arm = Arm()
     arm.move_to_home(gripper_angle_deg=80)
     frame_draw = None
     instructions = [
+        "抓取最近的积木",
         "抓取红色积木",
         "抓取最右边的红色积木",
         "抓取最右边的黄色积木",
@@ -37,6 +39,7 @@ def main():
     box = None
     while True:
         if future is None or future.done():
+            arm.move_to(default_gripper_aside_pos, 80)
             instruction = np.random.choice(instructions)
             print("Instruction:", instruction)
             response_task, frame = llm_detect.detect_scene(
@@ -83,6 +86,8 @@ def main():
                     )
                     cv2.imshow("LLM Detection", frame_draw)
                     if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
+                        arm.disconnect_arm()
+                        cv2.destroyAllWindows()
                         exit()
                     if done:
                         break
@@ -92,6 +97,7 @@ def main():
             cv2.imshow("LLM Detection", frame_draw)
             if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
                 break
+    arm.disconnect_arm()
     cv2.destroyAllWindows()
 
 
