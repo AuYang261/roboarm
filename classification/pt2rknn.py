@@ -16,7 +16,7 @@ def pt2onnx(model_path: str):
     model = YOLO(model=model_path)
 
     # 导出为 ONNX（固定输入尺寸，如 640x640）
-    model.export(format="onnx", opset=19, imgsz=1280, dynamic=False, simplify=True)
+    model.export(format="onnx", opset=19, imgsz=640, dynamic=False, simplify=True)
     
 def onnx2rknn(onnx_path: str):
     from rknn.api import RKNN
