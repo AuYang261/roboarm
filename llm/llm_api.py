@@ -2,6 +2,7 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from config_getter import get_config_value
 from turtle import width
 from openai.types.chat.chat_completion import ChatCompletion
 from openai import OpenAI, AsyncOpenAI
@@ -24,24 +25,23 @@ from llm.dataclass import DetectedFromLLM
 
 class LLMAPI:
 
-    def __init__(self, base_url: str = "https://openrouter.ai/api/v1"):
-        config_yaml = yaml.safe_load(
-            open(
-                os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml"),
-                encoding="utf-8",
-            )
-        )
-        prompts_file = config_yaml["prompts_file"]
+    def __init__(self):
+        https_proxy = get_config_value("https_proxy", None, False)
+        if https_proxy is not None:
+            os.environ["https_proxy"] = https_proxy
+
+        prompts_file = get_config_value("prompts_file")
         self.prompts = toml.load(
             os.path.join(os.path.dirname(os.path.dirname(__file__)), prompts_file)
         )["prompts"]
+        self.base_url = get_config_value("llm_base_url")
         self.client = OpenAI(
-            base_url=base_url,
-            api_key=config_yaml["openrouter_api_key"],
+            base_url=self.base_url,
+            api_key=get_config_value("llm_api_key"),
         )
         self.async_client = AsyncOpenAI(
-            base_url=base_url,
-            api_key=config_yaml["openrouter_api_key"],
+            base_url=self.base_url,
+            api_key=get_config_value("llm_api_key"),
         )
 
         # 启动后台事件循环线程
@@ -109,11 +109,11 @@ class LLMAPI:
         image_base64: str,
         prompt_key: str,
         replace_map: dict[str, str] | None = None,
-        model: str = "qwen/qwen3-vl-235b-a22b-instruct",
-        # model: str = "google/gemini-3-pro-preview",
+        # model: str = "qwen/qwen3-vl-235b-a22b-instruct",
+        model: str = "google/gemini-3-flash-preview",
         debug: bool = False,
         schema: dict[str, Any] | None = None,
-        temperature: float = 0.1,
+        temperature: float = 0.0,
     ) -> "futures.Future[ChatCompletion] | None":
         """
         异步发送图片聊天请求，返回一个 Future 对象。
@@ -252,6 +252,8 @@ if __name__ == "__main__":
     width, height = img.size
     font = ImageFont.truetype(r"C:\Windows\Fonts\msyh.ttc", 16)
     for box in boxes:
+        if not box.is_valid():
+            continue
         box = box.to_detected_box(img_w=width, img_h=height)
         label = box.class_name
         x_center, y_center = box.box_center_x, box.box_center_y

@@ -28,11 +28,27 @@ default_gripper_aside_pos:
 
 # =======大模型=======
 
-# openrouter的api_key
-openrouter_api_key: ****
+# 请求大模型的平台url
+llm_base_url: https://openrouter.ai/api/v1
+
+# 大模型平台的api_key
+llm_api_key: ****
 
 # 提示词文件
 prompts_file: prompts.toml
+
+# 代理地址，使用代理可能请求失败
+https_proxy: 
+
+# 语音转文字APIID
+APPID: 
+
+# 语音转文字APISecret
+APISecret: 
+
+# 语音转文字APIKey
+APIKey: 
+
 
 # =======物品分类场景=======
 

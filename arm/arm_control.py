@@ -9,6 +9,7 @@ import cv2
 sys.path.append(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "lerobot/src/")
 )
+from config_getter import get_config_value
 from lerobot.robots.koch_follower import config_koch_follower, koch_follower
 from pathlib import Path
 from typing import Union, List
@@ -46,23 +47,22 @@ class Arm:
             raise FileNotFoundError(
                 f"找不到配置文件，请按 {config_path}.example 创建配置文件{config_path}"
             )
-        self.config_yaml = yaml.safe_load(open(config_path, "r", encoding="utf-8"))
-        self.desktop_height = self.config_yaml["default_desktop_height"]
-        self.catch_raise_height = self.config_yaml.get("catch_raise_height", 0.1)
-        self.place_raise_height = self.config_yaml.get("place_raise_height", 0.1)
-        self.default_gripper_close_threshold = self.config_yaml[
+        self.desktop_height = get_config_value("default_desktop_height")
+        self.catch_raise_height = get_config_value("catch_raise_height", 0.1)
+        self.place_raise_height = get_config_value("place_raise_height", 0.1)
+        self.default_gripper_close_threshold = get_config_value(
             "default_gripper_close_threshold"
-        ]
-        self.catch_time_interval_s = self.config_yaml["catch_time_interval_s"]
-        self.get_arm_angles_retry_times = self.config_yaml["get_arm_angles_retry_times"]
-        port = self.config_yaml["arm_port"]
+        )
+        self.catch_time_interval_s = get_config_value("catch_time_interval_s")
+        self.get_arm_angles_retry_times = get_config_value("get_arm_angles_retry_times")
+        port = get_config_value("arm_port")
         self.steps = steps
         # 逆运动学优化目标权重
         self.position_weight, self.rotation_weight = 10, 1
         # 这个offset是用来修正机械臂零位的，目前不知道为什么舵机全零位置不是机械臂的零位
         # 所以每次重新标定或在新机械臂上需要重新测量这个offset
         # 方法见 arm/calibrate.py
-        self.offset = self.config_yaml["arm_offset"]
+        self.offset = get_config_value("arm_offset")
         if len(self.offset) != 5:
             raise ValueError(
                 "配置文件中没有正确设置机械臂offset arm_offset, 应该是5个关节的角度列表"

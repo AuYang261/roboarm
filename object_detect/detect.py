@@ -1,4 +1,3 @@
-import yaml
 from ultralytics import YOLO
 import cv2
 import numpy as np
@@ -7,6 +6,7 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from config_getter import get_config_value
 from camera.camera_api import Camera
 
 
@@ -47,20 +47,11 @@ def load_model(model_path, device=""):
 
 
 def main():
-    config_yaml = yaml.safe_load(
-        open(
-            os.path.join(
-                os.path.dirname(os.path.dirname(__file__)),
-                "config.yaml",
-            ),
-            encoding="utf-8",
-        )
-    )
     model_paths = [
         os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
-        for path in config_yaml.get("classification_YOLO_model_path", [])
+        for path in get_config_value("classification_YOLO_model_path", [])
     ]
-    default_conf_thres = config_yaml["default_conf_thres"]
+    default_conf_thres = get_config_value("default_conf_thres")
 
     # Load model
     model = load_model(model_paths[0])

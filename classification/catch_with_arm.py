@@ -4,6 +4,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from arm.arm_control import Arm
+from config_getter import get_config_value
 import numpy as np
 from object_detect.detect import (
     detect_objects_in_frame,
@@ -13,27 +14,20 @@ from object_detect.detect import (
 from camera.camera_api import Camera
 import cv2
 import time
-import yaml
 import concurrent.futures
 
 
 def main():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    config_yaml = yaml.safe_load(
-        open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml"),
-            encoding="utf-8",
-        )
-    )
     model_paths = [
         os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
-        for path in config_yaml.get("classification_YOLO_model_path", [])
+        for path in get_config_value("classification_YOLO_model_path", [])
     ]
-    default_gripper_aside_pos = config_yaml["default_gripper_aside_pos"]
-    default_conf_thres = config_yaml["default_conf_thres"]
-    class_pos = config_yaml["class_pos"]
-    place_distance_threshold = config_yaml["place_distance_threshold"]
-    offset = config_yaml["catch_offset"]
+    default_gripper_aside_pos = get_config_value("default_gripper_aside_pos")
+    default_conf_thres = get_config_value("default_conf_thres")
+    class_pos = get_config_value("class_pos")
+    place_distance_threshold = get_config_value("place_distance_threshold")
+    offset = get_config_value("catch_offset")
 
     arm = Arm()
     arm.move_to_home(gripper_angle_deg=80)
