@@ -2,6 +2,7 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from config_getter import get_config_value
 from turtle import width
 from openai.types.chat.chat_completion import ChatCompletion
 from openai import OpenAI, AsyncOpenAI
@@ -25,27 +26,22 @@ from llm.dataclass import DetectedFromLLM
 class LLMAPI:
 
     def __init__(self):
-        config_yaml = yaml.safe_load(
-            open(
-                os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml"),
-                encoding="utf-8",
-            )
-        )
-        if "https_proxy" in config_yaml:
-            os.environ["https_proxy"] = config_yaml["https_proxy"]
+        https_proxy = get_config_value("https_proxy", None, False)
+        if https_proxy is not None:
+            os.environ["https_proxy"] = https_proxy
 
-        prompts_file = config_yaml["prompts_file"]
+        prompts_file = get_config_value("prompts_file")
         self.prompts = toml.load(
             os.path.join(os.path.dirname(os.path.dirname(__file__)), prompts_file)
         )["prompts"]
-        self.base_url = config_yaml["llm_base_url"]
+        self.base_url = get_config_value("llm_base_url")
         self.client = OpenAI(
             base_url=self.base_url,
-            api_key=config_yaml["llm_api_key"],
+            api_key=get_config_value("llm_api_key"),
         )
         self.async_client = AsyncOpenAI(
             base_url=self.base_url,
-            api_key=config_yaml["llm_api_key"],
+            api_key=get_config_value("llm_api_key"),
         )
 
         # 启动后台事件循环线程

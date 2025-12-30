@@ -40,6 +40,16 @@ prompts_file: prompts.toml
 # 代理地址，使用代理可能请求失败
 https_proxy: 
 
+# 语音转文字APIID
+APPID: 
+
+# 语音转文字APISecret
+APISecret: 
+
+# 语音转文字APIKey
+APIKey: 
+
+
 # =======物品分类场景=======
 
 # 以项目根目录为基准

@@ -2,6 +2,7 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from config_getter import get_config_value
 from pydantic import TypeAdapter
 from llm.dataclass import DetectedFromLLM
 import cv2
@@ -14,14 +15,8 @@ from llm.llm_detect import LLMDetect, json2box, draw_boxes_on_frame
 
 
 def main():
-    config_yaml = yaml.safe_load(
-        open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml"),
-            encoding="utf-8",
-        )
-    )
-    offset = config_yaml["catch_offset"]
-    default_gripper_aside_pos = config_yaml["default_gripper_aside_pos"]
+    offset = get_config_value("catch_offset")
+    default_gripper_aside_pos = get_config_value("default_gripper_aside_pos")
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     llm_detect = LLMDetect()
     arm = Arm()
