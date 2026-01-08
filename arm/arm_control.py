@@ -235,9 +235,9 @@ class Arm:
 
     def pixel2pos(self, u: float, v: float) -> tuple[float, float]:
         """
-        将图像坐标转换为机械臂坐标系位置，单位米
+        将图像坐标转换为机械臂坐标系位置
         u, v: 图像坐标，单位像素
-        返回值: x, y, 夹爪角度
+        返回值: x, y，单位米
         """
         if not hasattr(self, "hand_eye_calibration_matrix"):
             raise ValueError("没有手眼标定数据，无法转换图像坐标")
