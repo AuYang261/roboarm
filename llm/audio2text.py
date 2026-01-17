@@ -408,4 +408,4 @@ if __name__ == "__main__":
         api_key=get_config_value("APIKey"),
         api_secret=get_config_value("APISecret"),
     )
-    print("最终识别结果：", result)
+    print("麦克风识别结果：", result)
