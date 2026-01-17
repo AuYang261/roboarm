@@ -24,6 +24,7 @@ import kinpy
 import time
 import threading
 
+arm = None
 
 def read_urdf(urdf_content: str) -> kinpy.chain.SerialChain:
     chain = kinpy.build_serial_chain_from_urdf(urdf_content, "gripper_static_1")
@@ -161,10 +162,36 @@ def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
     time.sleep(1)
     arm.disconnect_arm()
 
+def test_moveto(chain: kinpy.chain.SerialChain, M, image_point):
+    
+    # global arm
+    arm = Arm()
+    arm.move_to_home(gripper_angle_deg=None)
+    arm.move_to
+    time.sleep(1)
+    
+    x = image_point[0]
+    y = image_point[1]
+    
+    target_x, target_y = arm.pixel2pos(x, y)
+    print(f"Clicked image point: ({x}, {y}), Mapped arm position: ({target_x}, {target_y})")
+    arm.move_to(
+            [target_x, target_y, 0.07],
+            gripper_angle_deg=80,
+            rot_rad=0,
+            warning=False,
+        )
+    
+    time.sleep(2)
+    # 归0
+    arm.move_to_home(gripper_angle_deg=None)
+
+    
 
 def main():
     argparser = argparse.ArgumentParser(description="机械臂手眼标定2D版")
-    argparser.add_argument("--mode", type=str, default="calibrate", help="模式")
+    # argparser.add_argument("--mode", type=str, default="calibrate", help="模式")
+    argparser.add_argument("--mode", type=str, default="test", help="模式")
     args = argparser.parse_args()
 
     image_points_path = os.path.join(
@@ -220,12 +247,14 @@ def main():
 
 def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
     # 回调函数：获取point并移动
+    # global arm
+    # arm = Arm()
     def mouse_callback(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:  # 左键点击
             print(f"Left button clicked at ({x}, {y})")
             # 创建一个线程去执行移动函数
             threading.Thread(
-                target=test_homography, args=(chain, homography_matrix, (x, y))
+                target=test_moveto, args=(chain, homography_matrix, (x, y))
             ).start()
 
     # 获取2d坐标 创建窗口并绑定鼠标回调函数
@@ -255,7 +284,7 @@ def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
 
     cv2.destroyAllWindows()
     cam.close()
-    arm = Arm()
+    
     arm.disable_torque()
     arm.disconnect_arm()
 

@@ -9,6 +9,8 @@ import numpy as np
 import time
 import os
 import sys
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from arm.arm_control import Arm
 
 # 使用机械臂摄像头对机械臂进行精确定位校准操作
 
@@ -49,11 +51,16 @@ def load_model(model_path, device=""):
     return model
 
 def main():
-
-    camera_index = 1
+    ARM_POS = True
+    YOLO_MODEL = False
+    
+    arm = Arm()
+    arm.disable_torque()
+    camera_index = 4
     cap = cv2.VideoCapture(camera_index)
     
     model = load_model(model_path)
+
     
     while(cap.isOpened()):
         # 读取摄像头的画面
@@ -64,6 +71,7 @@ def main():
         # 图片增加对比度
         # frame = cv2.convertScaleAbs(frame, alpha=1.5, beta=0)
         
+        #======================================================================
         # part1图像添加mask
         """
         Point coordinates: (53, 251)
@@ -108,27 +116,32 @@ def main():
         cv2.fillPoly(mask, [pts2], (255, 255, 255))
         frame = cv2.bitwise_and(frame, mask)
         # 展示添加mask后的图像
-        cv2.imshow('Masked Frame', frame)
+        # cv2.imshow('Masked Frame', frame)
         
+        
+        
+        #======================================================================
         # part2 添加mask后图像使用yolo检测物体
-        results = detect_objects_in_frame(
-            model,
-            frame,
-            conf_thres=default_conf_thres,
-        )
-        annotated_frame = frame.copy()
-        for (x, y, w, h, r), score, class_id, class_name in results:
-            draw_box(
-                annotated_frame,
-                x,
-                y,
-                w,
-                h,
-                np.rad2deg(r),
-                f"{class_name}: {score:.2f}",
+        if YOLO_MODEL:
+            results = detect_objects_in_frame(
+                model,
+                frame,
+                conf_thres=default_conf_thres,
             )
-        cv2.imshow("YOLOv11", annotated_frame)
+            annotated_frame = frame.copy()
+            for (x, y, w, h, r), score, class_id, class_name in results:
+                draw_box(
+                    annotated_frame,
+                    x,
+                    y,
+                    w,
+                    h,
+                    np.rad2deg(r),
+                    f"{class_name}: {score:.2f}",
+                )
+            cv2.imshow("YOLOv11", annotated_frame)
         
+        #======================================================================
         # part3 边缘检测和轮廓绘制
         # 转为灰度图
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -136,9 +149,46 @@ def main():
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
         # 边缘检测
         edged = cv2.Canny(blurred, 50, 150)
-        cv2.imshow('Edged Frame', edged)
         
+        # cv2.imshow('Edged Frame', edged)
+        
+        # 去除长直线
+        lines = cv2.HoughLinesP(edged, 1, np.pi / 180, threshold=100, minLineLength=100, maxLineGap=10)
+        if lines is not None:
+            for line in lines:
+                x1, y1, x2, y2 = line[0]
+                cv2.line(edged, (x1, y1), (x2, y2), 0, 3)  # 用黑色覆盖长直线
 
+        # 查找 最大的 封闭轮廓 在全黑的 背景图上画图
+        contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if contours:
+            # 找到最大的轮廓
+            largest_contour = max(contours, key=cv2.contourArea)
+            # 在 全黑 的边缘图上绘制最大的轮廓 
+            # edged = frame.copy() # 带色彩， 注释就是黑白 轮廓
+            edged = np.zeros_like(frame)  # 全黑背景
+            cv2.drawContours(edged, [largest_contour], -1, (255, 255, 255), 2)
+            
+            # 确定轮廓中心点的位置
+            M = cv2.moments(largest_contour)
+            if M["m00"] != 0:
+                cX = int(M["m10"] / M["m00"])
+                cY = int(M["m01"] / M["m00"])
+                # 在轮廓中心点绘制一个小圆点
+                cv2.circle(edged, (cX, cY), 5, (255, 0, 0), -1)
+                
+            # 计算轮廓的面积 
+            area = cv2.contourArea(largest_contour)
+            
+            # 图片上显示面积值 + 轮廓中心点坐标
+            cv2.putText(edged, f"Area: {area:.2f};Center: ({cX}, {cY})", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+        cv2.imshow('Largest Contour', edged)
+            
+        
+        #======================================================================
         # part4 在原始图像上绘制多边形
         # 原始图像上绘制多边形1
         cv2.polylines(org_frame, [pts], isClosed=True, color=(0, 0, 255), thickness=2)
@@ -153,8 +203,17 @@ def main():
                 print(f"Point coordinates: ({x}, {y})")
         cv2.setMouseCallback('Arm Camera Contours', get_point)
         
+        #======================================================================
+        # part5 获取机械臂当前关节角度值并打印 & 微调机械臂
+        
+        pos = arm.get_arm_pos()
+        if ARM_POS:
+            if pos is not None :
+                print(f"Arm position: {pos}")
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        #======================================================================
+        # 按下 'esc' 键退出循环
+        if cv2.waitKey(1) & 0xFF == 27:
             break
 
 if __name__ == "__main__":

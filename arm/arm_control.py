@@ -169,6 +169,14 @@ class Arm:
             for angle, offset in zip(angles_deg[:-1], self.offset, strict=True)
         ], angles_deg[-1]
 
+    def get_arm_pos(self)-> list[float]:
+        # 获取机械臂末端执行器位置，单位米
+        angles_deg, _ = self.get_arm_angles()
+        # 正运动学解析
+        fk = self.chain.forward_kinematics(np.deg2rad(angles_deg).tolist())
+        pos = fk.pos.tolist()
+        return pos
+    
     def disconnect_arm(self):
         self.arm.disconnect()
 
@@ -430,10 +438,12 @@ class Arm:
         else:
             print("放置位置格式错误，应该是[x, y]或[x, y, z]")
             return False
+        self.position_weight, self.rotation_weight = 10, 1
         if not self.catch(target_x, target_y, catch_rotate_rad, height=height):
             self.move_to_home(gripper_angle_deg=80)
             return False
-        self.move_to_home()
+        # self.move_to_home()
+        self.position_weight, self.rotation_weight = 50, 1
         if not self.place(place_x, place_y, place_z, place_rotate_rad):
             self.move_to_home(gripper_angle_deg=80)
             return False
