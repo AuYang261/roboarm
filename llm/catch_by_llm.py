@@ -1,5 +1,4 @@
 import os
-from pydoc import text
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -19,11 +18,67 @@ from llm.llm_detect import LLMDetect, json2box, draw_boxes_on_frame
 
 
 def catch_by_audio():
-    text = get_audio_text(
-        appid=get_config_value("APPID"),
-        api_key=get_config_value("APIKey"),
-        api_secret=get_config_value("APISecret"),
-    )
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    audio_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = None
+    audio_future = None
+    box_queue = Queue()
+    frame = None
+    text = None
+    cam = Camera()
+
+    def consumption_thread():
+        nonlocal frame
+        box = None
+        while True:
+            if not box_queue.empty():
+                box = box_queue.get(block=False)
+            if frame is None:
+                continue
+            frame_draw = draw_boxes_on_frame(
+                boxes=[box] if box else [],
+                frame=frame,
+            )
+            cv2.imshow("LLM Detection", frame_draw)
+            if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
+                cv2.destroyAllWindows()
+                break
+
+    thread = Thread(target=consumption_thread)
+    thread.start()
+    while True:
+        frame = cam.get_frames().get("color", None)
+        if frame is None:
+            print("Failed to grab frame")
+            continue
+        if future is None or future.done():
+            if audio_future and audio_future.done():
+                text = audio_future.result()
+                audio_future = None
+                print("Audio to Text:", text)
+            if text:
+                future = executor.submit(
+                    catch_by_instruction,
+                    frame,
+                    text,
+                    box_queue,
+                )
+                # 消费完指令后清空
+                text = None
+            # 不在抓取进行中，且没有抓取指令时，继续获取语音指令
+            if (future is None or future.done()) and (
+                audio_future is None or audio_future.done()
+            ):
+                audio_future = audio_executor.submit(
+                    get_audio_text,
+                    appid=get_config_value("APPID"),
+                    api_key=get_config_value("APIKey"),
+                    api_secret=get_config_value("APISecret"),
+                )
+                box_queue.put(None)  # 清空当前目标框
+        if not thread.is_alive():
+            break
+    cam.close()
 
 
 def catch_by_instruction(
@@ -136,4 +191,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    catch_by_audio()
