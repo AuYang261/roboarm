@@ -25,9 +25,6 @@ class Arm:
 
     def __init__(
         self,
-        config_path: str = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "config.yaml"
-        ),
         calibration_dir=os.path.join(
             os.path.dirname(os.path.dirname(__file__)), "calibration"
         ),
@@ -44,10 +41,6 @@ class Arm:
         hand_eye_calibration_file: 手眼标定文件路径，默认"hand-eye-data/2d_homography.npy"
         steps: 机械臂插值移动步数，步数越多越平滑但越慢
         """
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(
-                f"找不到配置文件，请按 {config_path}.example 创建配置文件{config_path}"
-            )
         self.desktop_height = get_config_value("default_desktop_height")
         self.catch_raise_height = get_config_value("catch_raise_height", 0.1)
         self.place_raise_height = get_config_value("place_raise_height", 0.1)
@@ -248,8 +241,9 @@ class Arm:
         target_x, target_y = world_coords[0, 0], world_coords[1, 0]
         return target_x, target_y
 
+    @staticmethod
     def gripper_angle_by_longer(
-        self, u: float, v: float, w: float, h: float, angle_deg: float
+        u: float, v: float, w: float, h: float, angle_deg: float
     ) -> float:
         """
         根据检测到的物体边界框，计算想沿较长边的方向抓取，夹爪应当采取的角度

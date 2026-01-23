@@ -364,14 +364,24 @@ def get_audio_text(
     #     audio_chunks.append(chunk)
     # audio_bytes = b"".join(audio_chunks)
 
-    with open(mic._save_path, "rb") as f:
+    result = audio_file2text(mic._save_path)
+    print("识别耗时: %.2f 秒" % (time.time() - start_time))
+    return result
+    # return result if result else "抓取最近的积木"
+
+
+def audio_file2text(audio_path: str) -> str:
+    """从音频文件获取转写文本"""
+    with open(audio_path, "rb") as f:
         audio_bytes = f.read()
-    audio_bytes = mp3_bytes_to_pcm_16k_mono_s16le(audio_bytes, format="wav")
+    audio_bytes = mp3_bytes_to_pcm_16k_mono_s16le(
+        audio_bytes, format=os.path.splitext(audio_path)[1][1:]
+    )
 
     wsParam = Ws_Param(
-        APPID=appid,
-        APISecret=api_secret,
-        APIKey=api_key,
+        APPID=get_config_value("APPID"),
+        APISecret=get_config_value("APISecret"),
+        APIKey=get_config_value("APIKey"),
         AudioBytes=audio_bytes,
     )
     result = ""
@@ -395,7 +405,6 @@ def get_audio_text(
             for i in text_ws:
                 for j in i["cw"]:
                     chunk_text += j.get("w", "")
-            # 不打印，直接累计到 result
             # 对于流式识别，每次只识别最新的，逐步累积结果
             # result += chunk_text
             # 读取文件识别，每次都会重复前面的结果，所以覆盖，但最后可能会输出一个句号，保留最长的结果
@@ -414,9 +423,7 @@ def get_audio_text(
     )
     ws.on_open = lambda ws: thread.start_new_thread(send, (ws, wsParam))
     ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
-    print("识别耗时: %.2f 秒" % (time.time() - start_time))
     return result
-    # return result if result else "抓取最近的积木"
 
 
 if __name__ == "__main__":

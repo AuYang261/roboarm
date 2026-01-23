@@ -50,10 +50,10 @@ class DetectedFromLLM:
 @dataclass
 class DetectedBox:
     class_name: str
-    box_center_x: int
-    box_center_y: int
-    box_width: int
-    box_height: int
+    box_center_x: int | float
+    box_center_y: int | float
+    box_width: int | float
+    box_height: int | float
     # Optional rotation angle of the bounding box in degrees
     box_rotation_deg: float = 0
     confidence: Optional[float] = None

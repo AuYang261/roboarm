@@ -10,7 +10,9 @@ def load_config(config_file: str) -> dict:
     加载 YAML 配置文件
     """
     if not os.path.exists(config_file):
-        raise FileNotFoundError(f"配置文件未找到: {config_file}")
+        raise FileNotFoundError(
+            f"配置文件未找到: {config_file}。请按 {config_file}.example 创建配置文件{config_file}"
+        )
 
     with open(config_file, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)

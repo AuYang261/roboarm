@@ -131,10 +131,6 @@ def calibrate_2d(
 
 
 def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
-    config_path: str = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)), "config.yaml"
-    )
-
     arm = Arm()
     arm.move_to_home(gripper_angle_deg=None)
     time.sleep(1)
@@ -162,6 +158,7 @@ def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
     time.sleep(1)
     arm.disconnect_arm()
 
+
 def test_moveto(chain: kinpy.chain.SerialChain, M, image_point):
     
     # global arm
@@ -186,7 +183,6 @@ def test_moveto(chain: kinpy.chain.SerialChain, M, image_point):
     # 归0
     arm.move_to_home(gripper_angle_deg=None)
 
-    
 
 def main():
     argparser = argparse.ArgumentParser(description="机械臂手眼标定2D版")

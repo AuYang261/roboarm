@@ -140,11 +140,11 @@ def main():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     instructions = [
         "抓取最近的积木",
-        "抓取红色积木",
-        "抓取最右边的红色积木",
-        "抓取最右边的黄色积木",
-        "抓取最上面的蓝色积木",
-        "抓取最远的蓝色积木",
+        # "抓取红色积木",
+        # "抓取最右边的红色积木",
+        # "抓取最右边的黄色积木",
+        # "抓取最上面的蓝色积木",
+        # "抓取最远的蓝色积木",
     ]
     future = None
     box_queue = Queue()
@@ -191,5 +191,5 @@ def main():
 
 
 if __name__ == "__main__":
-    # main()
-    catch_by_audio()
+    main()
+    # catch_by_audio()
