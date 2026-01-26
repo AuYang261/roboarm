@@ -19,3 +19,4 @@ config.yaml
 object_detect/data.yaml
 
 *.mp3
+*.wav

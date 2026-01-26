@@ -1,17 +1,5 @@
 # -*- coding:utf-8 -*-
-#
-#   author: iflytek
-#
-#  本demo测试时运行的环境为：Windows + Python3.7
-#  本demo测试成功运行时所安装的第三方库及其版本如下，您可自行逐一或者复制到一个新的txt文件利用pip一次性安装：
-#   cffi==1.12.3
-#   gevent==1.4.0
-#   greenlet==0.4.15
-#   pycparser==2.19
-#   six==1.12.0
-#   websocket==0.2.1
-#   websocket-client==0.56.0
-#
+
 #  语音听写流式 WebAPI 接口调用示例 接口文档（必看）：https://doc.xfyun.cn/rest_api/语音听写（流式版）.html
 #  webapi 听写服务参考帖子（必看）：http://bbs.xfyun.cn/forum.php?mod=viewthread&tid=38947&extra=
 #  语音听写流式WebAPI 服务，热词使用方式：登陆开放平台https://www.xfyun.cn/后，找到控制台--我的应用---语音听写（流式）---服务管理--个性化热词，
@@ -23,6 +11,7 @@
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 import os
 import sys
+from tracemalloc import start
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import _thread as thread
@@ -45,6 +34,7 @@ from datetime import datetime
 from urllib.parse import urlencode
 from wsgiref.handlers import format_date_time
 import sounddevice as sd
+import wave
 
 STATUS_FIRST_FRAME = 0  # 第一帧的标识
 STATUS_CONTINUE_FRAME = 1  # 中间帧标识
@@ -66,16 +56,37 @@ class MicPCMStream:
         self._stream: "sd.InputStream | None" = None
         self._closed = False
 
+        self._save_path: str = os.path.join(os.path.dirname(__file__), "mic_record.wav")
+        self._wav_fp: "wave.Wave_write | None" = None
+
+    def _open_wav_if_needed(self) -> None:
+        if self._wav_fp is not None:
+            return
+        os.makedirs(os.path.dirname(self._save_path), exist_ok=True)
+        wf = wave.open(self._save_path, "wb")
+        wf.setnchannels(self.channels)
+        wf.setsampwidth(2)  # int16 => 2 bytes
+        wf.setframerate(self.sample_rate)
+        self._wav_fp = wf
+
     def start(self, device: int | None = None):
+        self._open_wav_if_needed()
+
         def callback(indata: np.ndarray, frames: int, time_info, status):
             # indata dtype=int16, shape=(frames, channels)
-            if status:
-                # 可以打印，但不要太频繁
-                pass
             if self._closed:
                 return
+
+            raw = indata.tobytes()
             try:
-                self.q.put_nowait(indata.tobytes())
+                if self._wav_fp is not None:
+                    self._wav_fp.writeframes(raw)
+            except Exception:
+                # 保存失败不应影响主流程
+                pass
+
+            try:
+                self.q.put_nowait(raw)
             except queue.Full:
                 # 丢帧（实时场景可接受）
                 pass
@@ -96,6 +107,11 @@ class MicPCMStream:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+        if self._wav_fp is not None:
+            try:
+                self._wav_fp.close()
+            finally:
+                self._wav_fp = None
 
     def read_bytes(self, n: int, timeout: float = 1.0) -> bytes:
         """
@@ -110,25 +126,30 @@ class MicPCMStream:
                 continue
             chunks.append(b)
             total += len(b)
+
         data = b"".join(chunks)
         if len(data) > n:
-            # 多出来的塞回去（简化：不塞回也行，但会丢少量数据）
-            extra = data[n:]
+            # 直接截断，多余部分丢弃
             data = data[:n]
-            try:
-                self.q.put_nowait(extra)
-            except queue.Full:
-                pass
         return data
 
 
 class Ws_Param(object):
     # 初始化
     def __init__(self, APPID, APIKey, APISecret, AudioBytes, MicStream=None):
+        """初始化websocket参数
+
+        参数:
+            APPID: 应用ID
+            APIKey: API Key
+            APISecret: API Secret
+            AudioBytes: 音频数据，一次性识别全部音频字节
+            MicStream: 麦克风音频流，流式识别，可选，不为空时优先使用麦克风，忽略 AudioBytes
+        """
         self.APPID = APPID
         self.APIKey = APIKey
         self.APISecret = APISecret
-        self.AudioBytes = AudioBytes
+        self.AudioBytes: bytes = AudioBytes
         self.MicStream = MicStream
         self.iat_params = {
             "domain": "slm",
@@ -209,7 +230,8 @@ def on_error(ws, error):
 
 # 收到websocket关闭的处理
 def on_close(ws, close_status_code, close_msg):
-    print("### closed :", close_status_code, close_msg)
+    # print("### closed :", close_status_code, close_msg)
+    pass
 
 
 def send(ws, wsParam: Ws_Param):
@@ -227,79 +249,85 @@ def send(ws, wsParam: Ws_Param):
     mv = memoryview(wsParam.AudioBytes)
     total = len(mv)
 
-    while True:
-        # 取一帧 buf
-        if mic is not None:
-            buf = mic.read_bytes(frameSize)
-            if not buf:
-                status = STATUS_LAST_FRAME
-        else:
-            if offset >= total:
-                buf = b""
+    try:
+        while True:
+            # 取一帧 buf
+            if mic is not None:
+                buf = mic.read_bytes(frameSize)
+                if not buf:
+                    status = STATUS_LAST_FRAME
             else:
-                buf = mv[offset : offset + frameSize].tobytes()
-                offset += frameSize
+                if offset >= total:
+                    buf = b""
+                else:
+                    buf = mv[offset : offset + frameSize].tobytes()
+                    offset += frameSize
+                if not buf:
+                    status = STATUS_LAST_FRAME
+            audio = str(base64.b64encode(buf), "utf-8")
+
+            # 文件结束
             if not buf:
                 status = STATUS_LAST_FRAME
-        audio = str(base64.b64encode(buf), "utf-8")
+            # 第一帧处理
+            if status == STATUS_FIRST_FRAME:
 
-        # 文件结束
-        if not buf:
-            status = STATUS_LAST_FRAME
-        # 第一帧处理
-        if status == STATUS_FIRST_FRAME:
+                d = {
+                    "header": {"status": 0, "app_id": wsParam.APPID},
+                    "parameter": {"iat": wsParam.iat_params},
+                    "payload": {
+                        "audio": {
+                            "audio": audio,
+                            "sample_rate": 16000,
+                            "encoding": "raw",
+                        }
+                    },
+                }
+                d = json.dumps(d)
+                ws.send(d)
+                status = STATUS_CONTINUE_FRAME
+            # 中间帧处理
+            elif status == STATUS_CONTINUE_FRAME:
+                d = {
+                    "header": {"status": 1, "app_id": wsParam.APPID},
+                    "parameter": {"iat": wsParam.iat_params},
+                    "payload": {
+                        "audio": {
+                            "audio": audio,
+                            "sample_rate": 16000,
+                            "encoding": "raw",
+                        }
+                    },
+                }
+                ws.send(json.dumps(d))
+            # 最后一帧处理
+            elif status == STATUS_LAST_FRAME:
+                d = {
+                    "header": {"status": 2, "app_id": wsParam.APPID},
+                    "parameter": {"iat": wsParam.iat_params},
+                    "payload": {
+                        "audio": {
+                            "audio": audio,
+                            "sample_rate": 16000,
+                            "encoding": "raw",
+                        }
+                    },
+                }
+                ws.send(json.dumps(d))
+                break
 
-            d = {
-                "header": {"status": 0, "app_id": wsParam.APPID},
-                "parameter": {"iat": wsParam.iat_params},
-                "payload": {
-                    "audio": {
-                        "audio": audio,
-                        "sample_rate": 16000,
-                        "encoding": "raw",
-                    }
-                },
-            }
-            d = json.dumps(d)
-            ws.send(d)
-            status = STATUS_CONTINUE_FRAME
-        # 中间帧处理
-        elif status == STATUS_CONTINUE_FRAME:
-            d = {
-                "header": {"status": 1, "app_id": wsParam.APPID},
-                "parameter": {"iat": wsParam.iat_params},
-                "payload": {
-                    "audio": {
-                        "audio": audio,
-                        "sample_rate": 16000,
-                        "encoding": "raw",
-                    }
-                },
-            }
-            ws.send(json.dumps(d))
-        # 最后一帧处理
-        elif status == STATUS_LAST_FRAME:
-            d = {
-                "header": {"status": 2, "app_id": wsParam.APPID},
-                "parameter": {"iat": wsParam.iat_params},
-                "payload": {
-                    "audio": {
-                        "audio": audio,
-                        "sample_rate": 16000,
-                        "encoding": "raw",
-                    }
-                },
-            }
-            ws.send(json.dumps(d))
-            break
-
-        # 模拟音频采样间隔
-        time.sleep(intervel)
+            # 模拟音频采样间隔
+            time.sleep(intervel)
+    except Exception as e:
+        print("send error:", e)
 
 
-def mp3_bytes_to_pcm_16k_mono_s16le(mp3_bytes: bytes) -> bytes:
+def mp3_bytes_to_pcm_16k_mono_s16le(mp3_bytes: bytes, format="mp3") -> bytes:
     """
     MP3(bytes) -> raw PCM bytes (s16le), 16kHz, mono
+    参数:
+        mp3_bytes: 输入的 MP3 格式音频数据
+        format: 音频格式，mp3, wav 或 m4a（mp4）
 
     返回值:
         pcm_bytes: 不含 WAV 头的原始 PCM 数据，可直接用于你现有的
@@ -307,7 +335,7 @@ def mp3_bytes_to_pcm_16k_mono_s16le(mp3_bytes: bytes) -> bytes:
     依赖:
         pydub（其内部可依赖 ffmpeg，但这里不直接调用 ffmpeg 命令行）
     """
-    audio = AudioSegment.from_file(io.BytesIO(mp3_bytes), format="mp3")
+    audio = AudioSegment.from_file(io.BytesIO(mp3_bytes), format=format)
     audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
     return audio.raw_data
 
@@ -323,20 +351,37 @@ def get_audio_text(
     input("请开始说话...，按回车键结束录音。\n")
     mic.stop()
     print("录音结束，正在识别...")
+    start_time = time.time()
 
-    audio_chunks: list[bytes] = []
-    while True:
-        try:
-            chunk = mic.q.get_nowait()
-        except queue.Empty:
-            break
-        audio_chunks.append(chunk)
-    audio_bytes = b"".join(audio_chunks)
+    # 从麦克风队列读取全部音频数据
+    # 不是很稳定，改为直接读取保存的文件
+    # audio_chunks: list[bytes] = []
+    # while True:
+    #     try:
+    #         chunk = mic.q.get_nowait()
+    #     except queue.Empty:
+    #         break
+    #     audio_chunks.append(chunk)
+    # audio_bytes = b"".join(audio_chunks)
+
+    result = audio_file2text(mic._save_path)
+    print("识别耗时: %.2f 秒" % (time.time() - start_time))
+    return result
+    # return result if result else "抓取最近的积木"
+
+
+def audio_file2text(audio_path: str) -> str:
+    """从音频文件获取转写文本"""
+    with open(audio_path, "rb") as f:
+        audio_bytes = f.read()
+    audio_bytes = mp3_bytes_to_pcm_16k_mono_s16le(
+        audio_bytes, format=os.path.splitext(audio_path)[1][1:]
+    )
 
     wsParam = Ws_Param(
-        APPID=appid,
-        APISecret=api_secret,
-        APIKey=api_key,
+        APPID=get_config_value("APPID"),
+        APISecret=get_config_value("APISecret"),
+        APIKey=get_config_value("APIKey"),
         AudioBytes=audio_bytes,
     )
     result = ""
@@ -360,8 +405,11 @@ def get_audio_text(
             for i in text_ws:
                 for j in i["cw"]:
                     chunk_text += j.get("w", "")
-            # 不打印，直接累计到 result
-            result += chunk_text
+            # 对于流式识别，每次只识别最新的，逐步累积结果
+            # result += chunk_text
+            # 读取文件识别，每次都会重复前面的结果，所以覆盖，但最后可能会输出一个句号，保留最长的结果
+            if len(chunk_text) > len(result):
+                result = chunk_text
         if status == 2:
             ws.close()
 
@@ -379,10 +427,10 @@ def get_audio_text(
 
 
 if __name__ == "__main__":
-    with open(os.path.join(os.path.dirname(__file__), "iat_mp3_16k.mp3"), "rb") as f:
+    with open(os.path.join(os.path.dirname(__file__), "test.m4a"), "rb") as f:
         audio_bytes = f.read()
 
-    audio_bytes = mp3_bytes_to_pcm_16k_mono_s16le(audio_bytes)
+    audio_bytes = mp3_bytes_to_pcm_16k_mono_s16le(audio_bytes, format="m4a")
 
     wsParam = Ws_Param(
         APPID=get_config_value("APPID"),

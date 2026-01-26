@@ -1,5 +1,4 @@
 import os
-from pydoc import text
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -19,11 +18,67 @@ from llm.llm_detect import LLMDetect, json2box, draw_boxes_on_frame
 
 
 def catch_by_audio():
-    text = get_audio_text(
-        appid=get_config_value("APPID"),
-        api_key=get_config_value("APIKey"),
-        api_secret=get_config_value("APISecret"),
-    )
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    audio_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = None
+    audio_future = None
+    box_queue = Queue()
+    frame = None
+    text = None
+    cam = Camera()
+
+    def consumption_thread():
+        nonlocal frame
+        box = None
+        while True:
+            if not box_queue.empty():
+                box = box_queue.get(block=False)
+            if frame is None:
+                continue
+            frame_draw = draw_boxes_on_frame(
+                boxes=[box] if box else [],
+                frame=frame,
+            )
+            cv2.imshow("LLM Detection", frame_draw)
+            if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
+                cv2.destroyAllWindows()
+                break
+
+    thread = Thread(target=consumption_thread)
+    thread.start()
+    while True:
+        frame = cam.get_frames().get("color", None)
+        if frame is None:
+            print("Failed to grab frame")
+            continue
+        if future is None or future.done():
+            if audio_future and audio_future.done():
+                text = audio_future.result()
+                audio_future = None
+                print("Audio to Text:", text)
+            if text:
+                future = executor.submit(
+                    catch_by_instruction,
+                    frame,
+                    text,
+                    box_queue,
+                )
+                # 消费完指令后清空
+                text = None
+            # 不在抓取进行中，且没有抓取指令时，继续获取语音指令
+            if (future is None or future.done()) and (
+                audio_future is None or audio_future.done()
+            ):
+                audio_future = audio_executor.submit(
+                    get_audio_text,
+                    appid=get_config_value("APPID"),
+                    api_key=get_config_value("APIKey"),
+                    api_secret=get_config_value("APISecret"),
+                )
+                box_queue.put(None)  # 清空当前目标框
+        if not thread.is_alive():
+            break
+    cam.close()
 
 
 def catch_by_instruction(
@@ -52,9 +107,6 @@ def catch_by_instruction(
                 box = json2box(response, img_w=frame.shape[1], img_h=frame.shape[0])
                 print("检测到的目标:", box)
                 if box:
-                    # 考虑旋转180度
-                    box.box_center_x = frame.shape[1] - box.box_center_x
-                    box.box_center_y = frame.shape[0] - box.box_center_y
                     queue_output.put(box)
                     # 将图像坐标转换为机械臂坐标系
                     target_x, target_y = arm.pixel2pos(
@@ -85,11 +137,12 @@ def main():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     instructions = [
         "抓取最近的积木",
-        "抓取红色积木",
-        "抓取最右边的红色积木",
-        "抓取最右边的黄色积木",
-        "抓取最上面的蓝色积木",
-        "抓取最远的蓝色积木",
+        # "抓取红色积木",
+        # "抓取最右边的红色积木",
+        # "抓取最右边的黄色积木",
+        # "抓取最上面的蓝色积木",
+        # "抓取最远的蓝色积木",
+        # "抓取最右边的积木",
     ]
     future = None
     box_queue = Queue()
@@ -136,4 +189,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    catch_by_audio()

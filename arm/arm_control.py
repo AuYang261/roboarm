@@ -6,6 +6,7 @@ import os
 import time
 import cv2
 
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "lerobot/src/")
 )
@@ -24,9 +25,6 @@ class Arm:
 
     def __init__(
         self,
-        config_path: str = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "config.yaml"
-        ),
         calibration_dir=os.path.join(
             os.path.dirname(os.path.dirname(__file__)), "calibration"
         ),
@@ -43,10 +41,6 @@ class Arm:
         hand_eye_calibration_file: 手眼标定文件路径，默认"hand-eye-data/2d_homography.npy"
         steps: 机械臂插值移动步数，步数越多越平滑但越慢
         """
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(
-                f"找不到配置文件，请按 {config_path}.example 创建配置文件{config_path}"
-            )
         self.desktop_height = get_config_value("default_desktop_height")
         self.catch_raise_height = get_config_value("catch_raise_height", 0.1)
         self.place_raise_height = get_config_value("place_raise_height", 0.1)
@@ -169,14 +163,6 @@ class Arm:
             for angle, offset in zip(angles_deg[:-1], self.offset, strict=True)
         ], angles_deg[-1]
 
-    def get_arm_pos(self)-> list[float]:
-        # 获取机械臂末端执行器位置，单位米
-        angles_deg, _ = self.get_arm_angles()
-        # 正运动学解析
-        fk = self.chain.forward_kinematics(np.deg2rad(angles_deg).tolist())
-        pos = fk.pos.tolist()
-        return pos
-    
     def disconnect_arm(self):
         self.arm.disconnect()
 
@@ -255,8 +241,9 @@ class Arm:
         target_x, target_y = world_coords[0, 0], world_coords[1, 0]
         return target_x, target_y
 
+    @staticmethod
     def gripper_angle_by_longer(
-        self, u: float, v: float, w: float, h: float, angle_deg: float
+        u: float, v: float, w: float, h: float, angle_deg: float
     ) -> float:
         """
         根据检测到的物体边界框，计算想沿较长边的方向抓取，夹爪应当采取的角度
@@ -438,12 +425,10 @@ class Arm:
         else:
             print("放置位置格式错误，应该是[x, y]或[x, y, z]")
             return False
-        self.position_weight, self.rotation_weight = 10, 1
         if not self.catch(target_x, target_y, catch_rotate_rad, height=height):
             self.move_to_home(gripper_angle_deg=80)
             return False
-        # self.move_to_home()
-        self.position_weight, self.rotation_weight = 50, 1
+        self.move_to_home()
         if not self.place(place_x, place_y, place_z, place_rotate_rad):
             self.move_to_home(gripper_angle_deg=80)
             return False
