@@ -51,6 +51,8 @@ class Arm:
         self.get_arm_angles_retry_times = get_config_value("get_arm_angles_retry_times")
         port = get_config_value("arm_port")
         self.steps = steps
+        self.catch_times = 0
+        self.uncatch_times = 0
         # 逆运动学优化目标权重
         self.position_weight, self.rotation_weight = 10, 1
         # 这个offset是用来修正机械臂零位的，目前不知道为什么舵机全零位置不是机械臂的零位
@@ -100,6 +102,18 @@ class Arm:
                 )
             ) from e
 
+    def __del__(self):
+        # 保存 抓取 ACC 信息到 txt 文件中
+        # 创建文件
+        with open("arm_catch_acc.txt", "w") as f:
+            if self.catch_times == 0:
+                acc = 0.0
+            else:
+                acc = (self.catch_times - self.uncatch_times) / self.catch_times
+            f.write(f"Catch times: {self.catch_times}\n")
+            f.write(f"Uncatch times: {self.uncatch_times}\n")
+            f.write(f"Catch accuracy: {acc:.2%}\n")
+    
     def set_arm_angles(
         self,
         angles_deg: Sequence[float | int] | None = None,
@@ -163,6 +177,14 @@ class Arm:
             for angle, offset in zip(angles_deg[:-1], self.offset, strict=True)
         ], angles_deg[-1]
 
+    def get_arm_pos(self)-> list[float]:
+        # 获取机械臂末端执行器位置，单位米
+        angles_deg, _ = self.get_arm_angles()
+        # 正运动学解析
+        fk = self.chain.forward_kinematics(np.deg2rad(angles_deg).tolist())
+        pos = fk.pos.tolist()
+        return pos
+    
     def disconnect_arm(self):
         self.arm.disconnect()
 
@@ -290,7 +312,7 @@ class Arm:
         rad: 物体旋转角度，单位弧度
         height: 目标物体高度，单位米，默认桌面高度
         """
-
+        self.catch_times += 1
         if height == inf:
             height = self.desktop_height
 
@@ -340,6 +362,7 @@ class Arm:
         angles, gripper = self.get_arm_angles()
         if gripper is None or gripper < self.default_gripper_close_threshold:
             print("夹取失败")
+            self.uncatch_times += 1
             self.move_to_home(gripper_angle_deg=80)
             return False
         time.sleep(self.catch_time_interval_s)
