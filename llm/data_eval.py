@@ -1,3 +1,19 @@
+"""
+此脚本测试LLMDetect在数据集上的表现，计算IOU和mAP等指标
+放在dataset同级目录下，结构如下
+llm/
+  data_eval.py
+  dataset/
+    pic/
+      xxx1.png
+      xxx1.json
+      xxx2.png
+      xxx2.json
+      ...
+    抓取蓝色积木.m4a
+    抓取最近的积木.m4a
+"""
+
 import asyncio
 from math import inf
 import sys
@@ -58,33 +74,12 @@ def json_from_labelme2box(
         points = shape.get("points", [])
         if len(points) != 4 or len(label) == 0:
             continue
-        # 用cv2找能包含四个点的最小旋转矩形
-        # pts = cv2.boxPoints(cv2.minAreaRect(np.array(points, dtype=np.float32)))
-        # center_x = float(np.mean(pts[:, 0]))
-        # center_y = float(np.mean(pts[:, 1]))
-        # width = float(np.linalg.norm(pts[0] - pts[1]))  # 取相邻两点的距离作为宽度
-        # height = float(np.linalg.norm(pts[1] - pts[2]))  # 取相邻两点的距离作为高度
-        # angle = cv2.minAreaRect(np.array(points, dtype=np.float32))[2]
-        # # cv2.minAreaRect返回的角度范围是[-90, 0)，需要转换为[0, 180)
-        # if width < height:
-        #     angle = angle + 90.0
-        # boxes.append(
-        #     DetectedBox(
-        #         class_name=label,
-        #         box_center_x=center_x,
-        #         box_center_y=center_y,
-        #         box_width=width,
-        #         box_height=height,
-        #         box_rotation_deg=angle,
-        #     )
-        # )
         boxes.append(BoxPoints(points[0], points[1], points[2], points[3], label))
     return boxes
 
 
 async def testcase_pic_llm_detect(
     pic_path: Path,
-    labelme_json: dict,
     boxes: list[BoxPoints],
     instruct_audio: Path,
 ) -> tuple[float, str, DetectedBox | None]:
@@ -276,11 +271,9 @@ async def main():
                 pic_path: Path,
                 audio_path: Path,
                 instruct_points: list[BoxPoints],
-                labelme_json: dict,
             ):
                 iou, instruction, box_llm = await testcase_pic_llm_detect(
                     pic_path=pic_path,
-                    labelme_json=labelme_json,
                     boxes=instruct_points,
                     instruct_audio=audio_path,
                 )
@@ -291,7 +284,6 @@ async def main():
                     pic_path=pic_path,
                     audio_path=audio_path,
                     instruct_points=instruct_points,
-                    labelme_json=labelme_json,
                 )
             )
     results = await asyncio.gather(*tasks, return_exceptions=True)

@@ -16,6 +16,7 @@ from threading import Thread
 
 from llm.llm_detect import LLMDetect, json2box, draw_boxes_on_frame
 
+arm = Arm()
 
 def catch_by_audio():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -85,11 +86,10 @@ def catch_by_instruction(
     frame: cv2.typing.MatLike, instruction: str, queue_output: Queue
 ):
     """根据和画面指令阻塞获取检测结果，执行抓取动作，并将检测结果放入队列中"""
+    global arm
     offset = get_config_value("catch_offset")
     default_gripper_aside_pos = get_config_value("default_gripper_aside_pos")
     llm_detect = LLMDetect()
-    arm = Arm()
-    # arm.move_to_home(gripper_angle_deg=80)
     arm.move_to(default_gripper_aside_pos, 80)
     response_task = llm_detect.detect_frame(
         frame,
@@ -130,7 +130,6 @@ def catch_by_instruction(
                 break
     else:
         print(f"No response({response_task}) or frame({frame}) available.")
-    arm.disconnect_arm()
 
 
 def main():
