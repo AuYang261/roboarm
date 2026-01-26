@@ -3,6 +3,7 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.camera_api import Camera
+from config_getter import get_config_value
 import cv2
 from PIL import Image, ImageDraw, ImageFont
 from pydantic import TypeAdapter
@@ -53,7 +54,8 @@ class LLMDetect:
         schema: dict[str, Any] | None = None,
     ) -> "futures.Future[ChatCompletion]|None":
         # 旋转180度以适应摄像头安装方向，需要根据实际安装情况调整
-        frame = cv2.rotate(frame, cv2.ROTATE_180)
+        if get_config_value("RotationCam2Arm", False, False):
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
         _, img_encoded = cv2.imencode(".jpg", frame)
         image_base64 = base64.b64encode(img_encoded.tobytes()).decode("utf-8")
 

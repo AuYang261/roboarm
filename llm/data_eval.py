@@ -38,6 +38,16 @@ class BoxPoints:
         self.point4 = point4
         self.label = label
 
+    def __str__(self) -> str:
+        point1_str = f"({self.point1[0]:.2f}, {self.point1[1]:.2f})"
+        point2_str = f"({self.point2[0]:.2f}, {self.point2[1]:.2f})"
+        point3_str = f"({self.point3[0]:.2f}, {self.point3[1]:.2f})"
+        point4_str = f"({self.point4[0]:.2f}, {self.point4[1]:.2f})"
+        return f"BoxPoints(label={self.label}, points=[{point1_str}, {point2_str}, {point3_str}, {point4_str}])"
+
+    def __repr__(self) -> str:
+        return self.__str__()
+
 
 def json_from_labelme2box(
     labelme_json: dict,
@@ -86,10 +96,8 @@ async def testcase_pic_llm_detect(
     pic = cv2.imread(pic_path.as_posix())
     llm_detect = LLMDetect()
     instruction = await asyncio.to_thread(audio_file2text, instruct_audio.as_posix())
-    # 旋转180度以适应摄像头安装方向，需要根据实际安装情况调整
-    pic_rotated = cv2.rotate(pic, cv2.ROTATE_180)
     response_task = llm_detect.detect_frame(
-        pic_rotated,
+        pic,
         prompt_key="user_instruction_prompt",
         replace_map={"{user_instruction}": instruction},
         schema=TypeAdapter(DetectedFromLLM).json_schema(),
@@ -102,7 +110,8 @@ async def testcase_pic_llm_detect(
     )
     if response is None:
         return -inf, "", None
-    box_llm = json2box(response, img_w=pic_rotated.shape[1], img_h=pic_rotated.shape[0])
+    box_llm = json2box(response, img_w=pic.shape[1], img_h=pic.shape[0])
+    save_debug_image(box_llm, pic_path, pic, boxes, instruct_audio)
     if not box_llm:
         return 0.0, "", None
     iou_list = []
@@ -121,8 +130,19 @@ async def testcase_pic_llm_detect(
         )
         iou = calculate_iou(pts_true, rect_llm)
         iou_list.append(iou)
+    return max(iou_list) if iou_list else -inf, instruction, box_llm
+
+
+def save_debug_image(
+    box_llm: DetectedBox | None,
+    pic_path: Path,
+    pic: cv2.typing.MatLike,
+    boxes: list[BoxPoints],
+    instruct_audio: Path,
+):
+
     # 将框画在图片上以便调试
-    pic_with_boxes = draw_boxes_on_frame([box_llm], pic)
+    pic_with_boxes = draw_boxes_on_frame([box_llm] if box_llm else [], pic)
     # 绘制真实框
     for points in boxes:
         pts = np.array(
@@ -155,7 +175,6 @@ async def testcase_pic_llm_detect(
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(buf.tobytes())
-    return max(iou_list) if iou_list else -inf, instruction, box_llm
 
 
 def calculate_iou(
@@ -291,33 +310,41 @@ async def main():
             f"图片: {pic_path.name}, 指令: {audio_path.name}, 目标坐标: {instruct_points}, 识别的指令: {instruction}, 识别的框: {box_llm}, IOU: {iou:.4f}"
         )
         ious.append(iou)
-    if ious:
-        print("IOU 统计信息:")
-        pr("mean", float(np.mean(ious)))
-        pr("min", float(np.min(ious)))
-        pr("25%", float(np.percentile(ious, 25)))
-        pr("median", float(np.median(ious)))
-        pr("75%", float(np.percentile(ious, 75)))
-        pr("99%", float(np.percentile(ious, 99)))
-        pr("max", float(np.max(ious)))
-        pr("std", float(np.std(ious)))
 
-        iou_threshold = 0.5
-        ap50 = sum(1 for iou in ious if iou >= iou_threshold) / len(ious)
-        pr("mAP50", ap50)
+    print("IOU 统计信息:")
+    pr("count", len(ious))
+    pr("precise", sum(1 for iou in ious if iou > 0.0))
+    pr("precision", sum(1 for iou in ious if iou > 0.0) / len(ious), percent=True)
+    pr("mean", float(np.mean(ious)))
+    pr("min", float(np.min(ious)))
+    pr("25%", float(np.percentile(ious, 25)))
+    pr("median", float(np.median(ious)))
+    pr("75%", float(np.percentile(ious, 75)))
+    pr("99%", float(np.percentile(ious, 99)))
+    pr("max", float(np.max(ious)))
+    pr("std", float(np.std(ious)))
 
-        # mAP50-95
-        iou_ranges = np.arange(0.5, 1.0, 0.05)
-        ap_list = []
-        for iou_threshold in iou_ranges:
-            ap = sum(1 for iou in ious if iou >= iou_threshold) / len(ious)
-            ap_list.append(ap)
-        map50_95 = float(np.mean(ap_list))
-        pr("mAP50-95", map50_95)
+    iou_threshold = 0.5
+    ap50 = sum(1 for iou in ious if iou >= iou_threshold) / len(ious)
+    pr("mAP50", ap50)
+
+    iou_ranges = np.arange(0.5, 1.0, 0.05)
+    ap_list = []
+    for iou_threshold in iou_ranges:
+        ap = sum(1 for iou in ious if iou >= iou_threshold) / len(ious)
+        ap_list.append(ap)
+    map50_95 = float(np.mean(ap_list))
+    pr("mAP50-95", map50_95)
 
 
-def pr(label: str, value: float):
-    print(f"{label:>10}: {value:.4f}")
+def pr(label: str, value: int | float, percent: bool = False):
+    if isinstance(value, int):
+        print(f"{label:>10}: {value}")
+    elif isinstance(value, float):
+        if percent:
+            print(f"{label:>10}: {value:.2%}")
+        else:
+            print(f"{label:>10}: {value:.4f}")
 
 
 if __name__ == "__main__":

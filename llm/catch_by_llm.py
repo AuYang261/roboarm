@@ -107,9 +107,6 @@ def catch_by_instruction(
                 box = json2box(response, img_w=frame.shape[1], img_h=frame.shape[0])
                 print("检测到的目标:", box)
                 if box:
-                    # 考虑旋转180度
-                    box.box_center_x = frame.shape[1] - box.box_center_x
-                    box.box_center_y = frame.shape[0] - box.box_center_y
                     queue_output.put(box)
                     # 将图像坐标转换为机械臂坐标系
                     target_x, target_y = arm.pixel2pos(
@@ -145,6 +142,7 @@ def main():
         # "抓取最右边的黄色积木",
         # "抓取最上面的蓝色积木",
         # "抓取最远的蓝色积木",
+        # "抓取最右边的积木",
     ]
     future = None
     box_queue = Queue()
@@ -191,5 +189,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
-    # catch_by_audio()
+    # main()
+    catch_by_audio()
