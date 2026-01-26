@@ -1,9 +1,11 @@
 __pycache__/
 .vscode/
+.claude/
 calibration/
 dataset/
 runs/
 yolov11/
+temp/
 
 *.txt
 .env

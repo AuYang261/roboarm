@@ -30,16 +30,13 @@ def read_urdf(urdf_content: str) -> kinpy.chain.SerialChain:
     chain = kinpy.build_serial_chain_from_urdf(urdf_content, "gripper_static_1")
     return chain
 
-
 def forward_kinematics(
     chain: kinpy.chain.SerialChain, joint_angles_rad: Sequence[float | int]
 ) -> kinpy.Transform:
     # 使用kinpy计算正运动学，欧拉角单位为弧度
     return chain.forward_kinematics(joint_angles_rad, end_only=True)  # type: ignore
 
-
 POINTS = []
-
 
 # 收集图片和机械臂末端坐标数据
 def collect_image_pose(image_points_path, angles_deg_list_path):
@@ -89,7 +86,6 @@ def collect_image_pose(image_points_path, angles_deg_list_path):
 
     return image_points_path, angles_deg_list_path
 
-
 def calibrate_2d(
     chain: kinpy.chain.SerialChain, image_points_path, angles_deg_list_path
 ):
@@ -128,7 +124,6 @@ def calibrate_2d(
     # M 就是你的 "像素->机器人" 转换器
     M, mask = cv2.findHomography(image_points, poses[:, :2], cv2.RANSAC, 5.0)
     return M
-
 
 def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
     config_path: str = os.path.join(
@@ -182,16 +177,60 @@ def test_moveto(chain: kinpy.chain.SerialChain, M, image_point):
             warning=False,
         )
     
-    time.sleep(2)
-    # 归0
-    arm.move_to_home(gripper_angle_deg=None)
+    # time.sleep(2)
+    # # 归0
+    # arm.move_to_home(gripper_angle_deg=None)
 
+def test_moveto_double_arm(chain: kinpy.chain.SerialChain, M, image_point):
+    pass
+
+def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
+    # 回调函数：获取point并移动
+    # global arm
+    # arm = Arm()
+    def mouse_callback(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:  # 左键点击
+            print(f"Left button clicked at ({x}, {y})")
+            # 创建一个线程去执行移动函数
+            threading.Thread(
+                target=test_moveto, args=(chain, homography_matrix, (x, y))
+            ).start()
+
+    # 获取2d坐标 创建窗口并绑定鼠标回调函数
+    window_name = "Camera"
+    cv2.namedWindow(window_name)
+    cv2.setMouseCallback(window_name, mouse_callback)
+
+    # 开启相机
+    cam = Camera(color=True, depth=False)
+    while True:
+        try:
+            frames = cam.get_frames()
+            color_image = frames.get("color")
+            if color_image is None:
+                print("failed to get color image")
+                time.sleep(0.5)
+                continue
+            cv2.imshow(window_name, color_image)
+
+            key = cv2.waitKey(1)
+            # esc退出
+            if key == 27:
+                break
+
+        except KeyboardInterrupt:
+            break
+
+    cv2.destroyAllWindows()
+    cam.close()
     
+    arm.disable_torque()
+    arm.disconnect_arm()
 
 def main():
     argparser = argparse.ArgumentParser(description="机械臂手眼标定2D版")
-    # argparser.add_argument("--mode", type=str, default="calibrate", help="模式")
-    argparser.add_argument("--mode", type=str, default="test", help="模式")
+    argparser.add_argument("--mode", type=str, default="calibrate", help="模式")
+    # argparser.add_argument("--mode", type=str, default="test", help="模式")
     args = argparser.parse_args()
 
     image_points_path = os.path.join(
@@ -238,56 +277,11 @@ def main():
         homography_matrix = np.load(homography_matrix_path)
         print("计算得到的单应性矩阵:")
         print(homography_matrix)
-        # for point in points:
-        #     test_homography(chain, homography_matrix, point)
+        for point in points:
+            test_homography(chain, homography_matrix, point)
     elif args.mode == "test":
         homography_matrix = np.load(homography_matrix_path)
         test_handeye_2d(chain, homography_matrix)
-
-
-def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
-    # 回调函数：获取point并移动
-    # global arm
-    # arm = Arm()
-    def mouse_callback(event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN:  # 左键点击
-            print(f"Left button clicked at ({x}, {y})")
-            # 创建一个线程去执行移动函数
-            threading.Thread(
-                target=test_moveto, args=(chain, homography_matrix, (x, y))
-            ).start()
-
-    # 获取2d坐标 创建窗口并绑定鼠标回调函数
-    window_name = "Camera"
-    cv2.namedWindow(window_name)
-    cv2.setMouseCallback(window_name, mouse_callback)
-
-    # 开启相机
-    cam = Camera(color=True, depth=False)
-    while True:
-        try:
-            frames = cam.get_frames()
-            color_image = frames.get("color")
-            if color_image is None:
-                print("failed to get color image")
-                time.sleep(0.5)
-                continue
-            cv2.imshow(window_name, color_image)
-
-            key = cv2.waitKey(1)
-            # esc退出
-            if key == 27:
-                break
-
-        except KeyboardInterrupt:
-            break
-
-    cv2.destroyAllWindows()
-    cam.close()
-    
-    arm.disable_torque()
-    arm.disconnect_arm()
-
 
 if __name__ == "__main__":
     main()
