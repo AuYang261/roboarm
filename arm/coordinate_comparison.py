@@ -41,6 +41,7 @@ class CoordinateComparator:
         """
         # 初始化机械臂
         self.arm = Arm()
+        self.arm.disable_torque()
 
         # 加载手眼标定矩阵
         if hand_eye_matrix_path is None:
@@ -216,6 +217,7 @@ class CoordinateComparator:
                     print(f"  像素坐标: {clicked_point}")
                     print(f"  手眼标定位姿: {hand_eye_position}")
                     print(f"  正运动学位姿: {fk_result['position']}")
+                    print(f"  夹爪角度: {gripper_state}")
 
                     # 重置点击点
                     clicked_point = None
@@ -390,7 +392,7 @@ Calibration Accuracy:
 
         # 保存图像
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = os.path.join(os.path.dirname(__file__), "comparison_results")
+        output_dir = os.path.join("comparison_results")
         os.makedirs(output_dir, exist_ok=True)
 
         output_path = os.path.join(output_dir, f"comparison_{timestamp}.png")
@@ -406,7 +408,7 @@ Calibration Accuracy:
             error_stats: 误差统计
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = os.path.join(os.path.dirname(__file__), "comparison_results")
+        output_dir = os.path.join("comparison_results")
         os.makedirs(output_dir, exist_ok=True)
 
         # 保存原始数据

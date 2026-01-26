@@ -6,6 +6,7 @@ dataset/
 runs/
 yolov11/
 temp/
+comparison_results/
 
 *.txt
 .env
