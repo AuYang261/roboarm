@@ -178,7 +178,6 @@ def test_moveto(chain: kinpy.chain.SerialChain, M, image_point):
     # # 归0
     # arm.move_to_home(gripper_angle_deg=None)
 
-<<<<<<< HEAD
 def test_moveto_double_arm(chain: kinpy.chain.SerialChain, M, image_point):
     pass
 
@@ -224,8 +223,6 @@ def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
     
     arm.disable_torque()
     arm.disconnect_arm()
-=======
->>>>>>> 7372297dc273e3ac49607dc95cd01b5e3a5c8c59
 
 def main():
     argparser = argparse.ArgumentParser(description="机械臂手眼标定2D版")
