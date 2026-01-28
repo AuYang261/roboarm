@@ -18,6 +18,7 @@ from llm.llm_detect import LLMDetect, json2box, draw_boxes_on_frame
 
 arm = Arm()
 
+
 def catch_by_audio():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     audio_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -87,6 +88,7 @@ def catch_by_instruction(
 ):
     """根据和画面指令阻塞获取检测结果，执行抓取动作，并将检测结果放入队列中"""
     global arm
+    print("Instruction:", instruction)
     offset = get_config_value("catch_offset")
     default_gripper_aside_pos = get_config_value("default_gripper_aside_pos")
     llm_detect = LLMDetect()
@@ -178,8 +180,8 @@ def main():
             future = executor.submit(
                 catch_by_instruction,
                 frame,
-                instructions[0],
-                # instructions[np.random.randint(0, len(instructions))],
+                # instructions[0],
+                instructions[np.random.randint(0, len(instructions))],
                 box_queue,
             )
         if not thread.is_alive():
