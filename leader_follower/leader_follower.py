@@ -11,6 +11,23 @@ import select
 import argparse
 import yaml
 
+
+
+def step_towards(current, target, step_size = 10) -> dict:
+    result = {}
+    for key in target.keys():
+        curr_value = current[key]
+        target_value = target[key]
+        if abs(target_value - curr_value) <= step_size:
+            result[key] = target_value
+        else:
+            if target_value > curr_value:
+                result[key] = curr_value + step_size
+            else:
+                result[key] = curr_value - step_size
+    return result   
+    
+
 def main():
     parser = argparse.ArgumentParser(description="Leader-Follower Control")
     parser.add_argument(
@@ -57,7 +74,7 @@ def main():
         },
     )
 
-    follower_arm_left = DynamixelMotorsBus(
+    follower_arm_right = DynamixelMotorsBus(
         port=follower_left_port,
         motors={
             "shoulder_pan": Motor(1, "xl430-w250", norm_mode_body),
@@ -71,9 +88,9 @@ def main():
 
     # 确保连接成功
     leader_arm_left.connect()
-    follower_arm_left.connect()
+    follower_arm_right.connect()
 
-    follower_arm_left.disable_torque()
+    follower_arm_right.disable_torque()
 
     calibration_path_leader = leader_arm_path
     calibration_data_leader = json.load(open(calibration_path_leader, "r"))
@@ -85,26 +102,57 @@ def main():
     calibration_data_follower = json.load(open(calibration_path_follower, "r"))
     for motor_name, calib in calibration_data_follower.items():
         calibration_data_follower[motor_name] = MotorCalibration(**calib)
-    follower_arm_left.write_calibration(calibration_dict=calibration_data_follower)
+    follower_arm_right.write_calibration(calibration_dict=calibration_data_follower)
 
     # 运行操作
     seconds = 3000
     frequency = 100
 
-    follower_arm_left.enable_torque()
-
+    follower_arm_right.enable_torque()
+    # 尝试添加摄像头
+    try:
+        sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+        from camera.camera_api import Camera
+        import cv2
+        camera = Camera(color=True, depth=False)
+        print("成功导入 camera 模块，开始视频采集")
+        # 创建一个线程来处理摄像头输入
+        import threading
+        def camera_thread():
+            while True:
+                frames = camera.get_frames()
+                if frames.get("color") is None:
+                    print("Failed to grab frame")
+                    continue
+                # 显示图像
+                cv2.imshow("Leader Follower Camera", frames["color"])
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    follower_arm_right.disable_torque()
+                    follower_arm_right.disconnect()
+                    leader_arm_left.disable_torque()
+                    leader_arm_left.disconnect()
+                    exit()
+        threading.Thread(target=camera_thread, daemon=True).start()
+    except ImportError:
+        print("无法导入 camera 模块，继续运行机械臂控制")
     for _ in tqdm.tqdm(range(seconds * frequency)):
         # 使用正确的键名 "left" 和 "right"
         try:
             leader_pos_left = {}
+            follow_pos_right = {}
             for motor in leader_arm_left.motors.keys():
                 leader_pos_left[motor] = leader_arm_left.read("Present_Position", motor=motor)
+            
+            for motor in follower_arm_right.motors.keys():
+                follow_pos_right[motor] = follower_arm_right.read("Present_Position", motor=motor)
+                
+            target_pos = step_towards(follow_pos_right, leader_pos_left, step_size=10)
 
             # print format .2f
             # print({k: f"{v:.2f}" for k, v in leader_pos_left.items()})
             # 将 leader 的位置发送到 follower
-            for motor, leader_pos in leader_pos_left.items():
-                follower_arm_left.write("Goal_Position", motor, leader_pos)
+            for motor, leader_pos in target_pos.items():
+                follower_arm_right.write("Goal_Position", motor, leader_pos)
 
             # 确保不会在过高频率下运行，可以加入一些延迟
             time.sleep(1 / frequency)
@@ -119,8 +167,8 @@ def main():
         except Exception as e:
             pass
 
-    follower_arm_left.disable_torque()
-    follower_arm_left.disconnect()
+    follower_arm_right.disable_torque()
+    follower_arm_right.disconnect()
     leader_arm_left.disable_torque()
     leader_arm_left.disconnect()
 

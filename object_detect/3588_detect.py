@@ -4,6 +4,14 @@ import numpy as np
 import time
 import os
 import sys
+import os
+import sys
+
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from config_getter import get_config_value
+import cv2
+import numpy as np
+import time
 
 
 '''
@@ -87,6 +95,7 @@ def draw_box(frame, u, v, w, h, angle_deg, label):
         2,
     )
 
+<<<<<<< HEAD
 def main():
     config_yaml = yaml.safe_load(
         open(
@@ -102,6 +111,15 @@ def main():
         config_yaml.get("classification_YOLO_model_path", ["best.rknn_lite"])[0]
     )
     default_conf_thres = config_yaml.get("default_conf_thres", 0.8)
+=======
+
+def main():
+    model_path = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        get_config_value("classification_YOLO_model_path", ["best.rknn_lite"])[0],
+    )
+    default_conf_thres = get_config_value("default_conf_thres", 0.8)
+>>>>>>> 84e04f9ccc792cf665ae1f8b57f939fecf298875
 
     # Load rknn_lite model
     rknn_lite = RKNNLite()
@@ -113,8 +131,7 @@ def main():
         exit(ret)
     # Init runtime environment
     print('--> Init runtime environment')
-    # ret = rknn_lite.init_runtime(core_mask=RKNNLite.NPU_CORE_0)
-    ret = rknn_lite.init_runtime()
+    ret = rknn_lite.init_runtime(core_mask=RKNNLite.NPU_CORE_0)
     if ret != 0:
         print('Init runtime environment failed')
         exit(ret)
@@ -133,7 +150,6 @@ def main():
             continue
 
         frame = frames["color"]
-        
 
         # Preprocess
         input_frame = preprocess_frame(frame, input_size=(640, 640))  # 根据你的模型调整
@@ -173,7 +189,7 @@ def main():
                 angle_deg,
                 f"{class_name}: {score:.2f}",
             )
-            
+
             print(f"{class_name}: {score:.2f}")
 
         fps = 1 / (end_time - start_time)
@@ -186,8 +202,8 @@ def main():
             (0, 255, 0),
             2,
         )
-        
-        # 将窗口最大化 
+
+        # 将窗口最大化
         cv2.imshow("rknn_lite YOLOv11 OBB Detection", annotated_frame)
         if cv2.waitKey(1) & 0xFF == 27:  # ESC
             break

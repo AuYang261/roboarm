@@ -3,6 +3,7 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.camera_api import Camera
+from config_getter import get_config_value
 import cv2
 from PIL import Image, ImageDraw, ImageFont
 from pydantic import TypeAdapter
@@ -22,7 +23,7 @@ font = ImageFont.truetype(r"C:\Windows\Fonts\msyh.ttc", 16)
 class LLMDetect:
     def __init__(self):
         self.llm_api = LLMAPI()
-        self.camera = Camera()
+        self.camera = None
 
     def detect_scene(
         self,
@@ -30,6 +31,8 @@ class LLMDetect:
         replace_map: dict[str, str] | None = None,
         schema: dict[str, Any] | None = None,
     ) -> tuple["futures.Future[ChatCompletion]|None", cv2.typing.MatLike | None]:
+        if self.camera is None:
+            self.camera = Camera(color=True, depth=False)
         frames = self.camera.get_frames()
         for _ in range(10):
             frames = self.camera.get_frames()
@@ -38,9 +41,22 @@ class LLMDetect:
             print("Failed to grab frame")
             return None, None
 
+        return (
+            self.detect_frame(color_frame, prompt_key, replace_map, schema),
+            color_frame,
+        )
+
+    def detect_frame(
+        self,
+        frame: cv2.typing.MatLike,
+        prompt_key: str,
+        replace_map: dict[str, str] | None = None,
+        schema: dict[str, Any] | None = None,
+    ) -> "futures.Future[ChatCompletion]|None":
         # 旋转180度以适应摄像头安装方向，需要根据实际安装情况调整
-        color_frame = cv2.rotate(color_frame, cv2.ROTATE_180)
-        _, img_encoded = cv2.imencode(".jpg", color_frame)
+        if get_config_value("RotationCam2Arm", False, False):
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
+        _, img_encoded = cv2.imencode(".jpg", frame)
         image_base64 = base64.b64encode(img_encoded.tobytes()).decode("utf-8")
 
         response_task = self.llm_api.chat_img_async(
@@ -49,7 +65,7 @@ class LLMDetect:
             replace_map=replace_map,
             schema=schema,
         )
-        return response_task, color_frame
+        return response_task
 
 
 def draw_boxes_on_frame(
