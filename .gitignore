@@ -4,6 +4,8 @@ calibration/
 dataset/
 runs/
 yolov11/
+temfile/
+classification/dataset_process/
 
 *.txt
 .env
