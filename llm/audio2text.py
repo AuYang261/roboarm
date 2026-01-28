@@ -347,6 +347,7 @@ def get_audio_text(
 ):
     """从麦克风获取一段音频并转写为文本"""
     mic = MicPCMStream(sample_rate=16000, channels=1, block_frames=640)
+    input("按回车键开始录音...\n")
     mic.start()
     input("请开始说话...，按回车键结束录音。\n")
     mic.stop()
