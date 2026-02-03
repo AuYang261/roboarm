@@ -113,7 +113,7 @@ class Arm:
             f.write(f"Catch times: {self.catch_times}\n")
             f.write(f"Uncatch times: {self.uncatch_times}\n")
             f.write(f"Catch accuracy: {acc:.2%}\n")
-    
+
     def set_arm_angles(
         self,
         angles_deg: Sequence[float | int] | None = None,
@@ -177,14 +177,18 @@ class Arm:
             for angle, offset in zip(angles_deg[:-1], self.offset, strict=True)
         ], angles_deg[-1]
 
-    def get_arm_pos(self)-> list[float]:
+    def get_arm_pos(self) -> list[float] | None:
         # 获取机械臂末端执行器位置，单位米
         angles_deg, _ = self.get_arm_angles()
+        if angles_deg is None:
+            return None
         # 正运动学解析
-        fk = self.chain.forward_kinematics(np.deg2rad(angles_deg).tolist())
+        fk: kinpy.Transform = self.chain.forward_kinematics(
+            np.deg2rad(angles_deg).tolist()
+        )  # type: ignore
         pos = fk.pos.tolist()
         return pos
-    
+
     def disconnect_arm(self):
         self.arm.disconnect()
 
@@ -394,34 +398,35 @@ class Arm:
             return False
         time.sleep(self.catch_time_interval_s)
 
+        # 改为不下降放置，直接在上方放开
         # 下降到目标位置
-        res = self.move_to(
-            [target_x, target_y, target_z],
-            gripper_angle_deg=0,
-            rot_rad=rad,
-        )
-        if res is None:
-            print("移动到目标位置失败，取消放置")
-            self.move_to_home(gripper_angle_deg=80)
-            return False
-        time.sleep(self.catch_time_interval_s)
+        # res = self.move_to(
+        #     [target_x, target_y, target_z],
+        #     gripper_angle_deg=0,
+        #     rot_rad=rad,
+        # )
+        # if res is None:
+        #     print("移动到目标位置失败，取消放置")
+        #     self.move_to_home(gripper_angle_deg=80)
+        #     return False
+        # time.sleep(self.catch_time_interval_s)
 
         # 放开物体
         self.set_arm_angles(gripper_angle_deg=80)
         time.sleep(self.catch_time_interval_s)
 
         # 抬起机械臂
-        res = self.move_to(
-            [target_x, target_y, target_z + self.place_raise_height],
-            gripper_angle_deg=80,
-            rot_rad=rad,
-            warning=False,
-        )
-        if res is None:
-            print("移动到目标位置失败，取消放置")
-            self.move_to_home(gripper_angle_deg=80)
-            return False
-        time.sleep(self.catch_time_interval_s)
+        # res = self.move_to(
+        #     [target_x, target_y, target_z + self.place_raise_height],
+        #     gripper_angle_deg=80,
+        #     rot_rad=rad,
+        #     warning=False,
+        # )
+        # if res is None:
+        #     print("移动到目标位置失败，取消放置")
+        #     self.move_to_home(gripper_angle_deg=80)
+        #     return False
+        # time.sleep(self.catch_time_interval_s)
         return True
 
     def catch_and_place(

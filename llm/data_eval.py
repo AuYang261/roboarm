@@ -305,6 +305,8 @@ async def main():
 
     print("IOU 统计信息:")
     pr("count", len(ious))
+    if len(ious) == 0:
+        return
     pr("precise", sum(1 for iou in ious if iou > 0.0))
     pr("precision", sum(1 for iou in ious if iou > 0.0) / len(ious), percent=True)
     pr("mean", float(np.mean(ious)))

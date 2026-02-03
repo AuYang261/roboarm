@@ -18,6 +18,7 @@ from llm.llm_detect import LLMDetect, json2box, draw_boxes_on_frame
 
 arm = Arm()
 
+
 def catch_by_audio():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     audio_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -87,10 +88,13 @@ def catch_by_instruction(
 ):
     """根据和画面指令阻塞获取检测结果，执行抓取动作，并将检测结果放入队列中"""
     global arm
+    print("Instruction:", instruction)
+    class_pos = get_config_value("class_pos")
     offset = get_config_value("catch_offset")
     default_gripper_aside_pos = get_config_value("default_gripper_aside_pos")
     llm_detect = LLMDetect()
     arm.move_to(default_gripper_aside_pos, 80)
+    print("LLM Detecting...")
     response_task = llm_detect.detect_frame(
         frame,
         prompt_key="user_instruction_prompt",
@@ -120,11 +124,23 @@ def catch_by_instruction(
                         box.box_height,
                         box.box_rotation_deg,
                     )
+                    if "红" in box.class_name or "red" in box.class_name.lower():
+                        print("红色积木，放置到红色区域")
+                        place_pos = class_pos.get("red_block")
+                    elif "黄" in box.class_name or "yellow" in box.class_name.lower():
+                        print("黄色积木，放置到黄色区域")
+                        place_pos = class_pos.get("yellow_block")
+                    elif "蓝" in box.class_name or "blue" in box.class_name.lower():
+                        print("蓝色积木，放置到蓝色区域")
+                        place_pos = class_pos.get("blue_block")
+                    else:
+                        print("未知积木，放置到默认区域")
+                        place_pos = class_pos.get("blue_block")
                     arm.catch_and_place(
                         target_x + offset * np.cos(gripper_angle_rad),
                         target_y + offset * np.sin(-gripper_angle_rad),
                         gripper_angle_rad,
-                        [0.2, 0.0],
+                        place_pos,
                     )
             if done:
                 break
@@ -136,12 +152,12 @@ def main():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     instructions = [
         "抓取最近的积木",
-        # "抓取红色积木",
-        # "抓取最右边的红色积木",
-        # "抓取最右边的黄色积木",
-        # "抓取最上面的蓝色积木",
-        # "抓取最远的蓝色积木",
-        # "抓取最右边的积木",
+        "抓取红色积木",
+        "抓取最右边的红色积木",
+        "抓取最右边的黄色积木",
+        "抓取最上面的蓝色积木",
+        "抓取最远的蓝色积木",
+        "抓取最右边的积木",
     ]
     future = None
     box_queue = Queue()
@@ -178,8 +194,8 @@ def main():
             future = executor.submit(
                 catch_by_instruction,
                 frame,
-                instructions[0],
-                # instructions[np.random.randint(0, len(instructions))],
+                # instructions[0],
+                instructions[np.random.randint(0, len(instructions))],
                 box_queue,
             )
         if not thread.is_alive():

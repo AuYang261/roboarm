@@ -5,6 +5,8 @@ calibration/
 dataset/
 runs/
 yolov11/
+temfile/
+classification/dataset_process/
 temp/
 comparison_results/
 
