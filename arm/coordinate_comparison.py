@@ -157,6 +157,12 @@ class CoordinateComparator:
             if event == cv2.EVENT_LBUTTONDOWN:
                 clicked_point = (x, y)
                 print(f"点击位置: ({x}, {y})")
+                joint_angles, gripper_state = self.arm.get_arm_angles()
+                # 通过正运动学计算位姿
+                fk_result = self.forward_kinematics_from_joint_angles(joint_angles)
+                print(f"  正运动学位姿: {fk_result['position']}")
+                print(f"  夹爪角度: {gripper_state}")
+            
 
         cv2.setMouseCallback(window_name, mouse_callback)
 

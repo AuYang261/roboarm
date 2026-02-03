@@ -1,217 +1,267 @@
-import yaml
-import cv2
-import numpy as np
-import time
 import os
 import sys
-import os
-import sys
-
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from config_getter import get_config_value
-import cv2
-import numpy as np
+import urllib
+import urllib.request
 import time
-
-
-'''
-conda create -n rknn_lite python=3.10
-conda activate rknn_lite
-wd
-sudo apt remove cmake
-sudo apt install -y build-essential git libprotobuf-dev protobuf-compiler libssl-dev
-# 安装对应版本的 cmake https://ashe27.github.io/2024/11/30/linux-build-cmake/ cmake version 3.28.1
-
-pip install --upgrade pip setuptools wheel
-pip install -r ./calibration/arm64_requirements_cp310.txt
-
-pip install "onnxoptimizer==0.3.8" "onnxruntime>=1.16.0"
-# pip install ./calibration/rknn_toolkit2-2.3.2-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
-pip install ./calibration/rknn_toolkit_lite2-2.3.2-cp310-cp310-manylinux_2_17_aarch64.manylinux2014_aarch64.whl
-'''
-
-
-import yaml
-import cv2
 import numpy as np
-import time
-import os
-import sys
-
-# 使用 rknn_lite Lite（适用于板端推理）
+import argparse
+import cv2,math
+from math import ceil
+from itertools import product as product
+from shapely.geometry import Polygon
+import pkg_resources
 from rknnlite.api import RKNNLite
 
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from camera.camera_api import Camera
+CLASSES = [
+            "TapScrew",
+            "PanScrew",
+            "ShortPanScrew",
+            "MiniPanScrew",
+            "HexBolt",
+            "HexNut",
+            "BlackHexNut"
+]
 
+nmsThresh = 0.4
+objectThresh = 0.5
 
-def preprocess_frame(frame, input_size=(640, 640)):
-    """将 BGR 图像预处理为模型输入格式（RGB + resize + 归一化）"""
-    # 转为 RGB
-    img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    # Resize 到模型输入尺寸
-    img_resized = cv2.resize(img_rgb, input_size, interpolation=cv2.INTER_LINEAR)
-    # 归一化到 [0, 1] 或 [0, 255] —— 根据你转换 rknn_lite 时的 config 决定
-    # 假设训练时是 /255.0，则这里也 /255.0；如果 rknn_lite config 用了 mean=[0,0,0], std=[255,255,255]，则输入应为 uint8
-    # 这里我们保持 uint8，让 rknn_lite 内部做 (x - mean) / std
-    img = np.expand_dims(img_resized, 0)
-    return img
-
-
-def postprocess_rknn_output(output, conf_thres=0.8, iou_thres=0.45, input_size=(640, 640)):
+def letterbox_resize(image, size, bg_color):
     """
-    后处理 rknn_lite 输出
-    假设 output 是 [1, N, 7]: x, y, w, h, angle(rad), conf, cls
+    letterbox_resize the image according to the specified size
+    :param image: input image, which can be a NumPy array or file path
+    :param size: target size (width, height)
+    :param bg_color: background filling data 
+    :return: processed image
     """
-    detections = output[0]  # [N, 7]
-    # 过滤低置信度
-    mask = detections[:, 5] >= conf_thres
-    detections = detections[mask]
+    if isinstance(image, str):
+        image = cv2.imread(image)
 
-    if len(detections) == 0:
-        return []
+    target_width, target_height = size
+    image_height, image_width, _ = image.shape
 
-    boxes = detections[:, :5]  # x, y, w, h, angle
-    scores = detections[:, 5]
-    class_ids = detections[:, 6].astype(int)
+    # Calculate the adjusted image size
+    aspect_ratio = min(target_width / image_width, target_height / image_height)
+    new_width = int(image_width * aspect_ratio)
+    new_height = int(image_height * aspect_ratio)
 
-    # 可选：添加 NMS（此处省略，YOLOv11 OBB 的 NMS 较复杂，若模型已内置可跳过）
-    # 简单起见，先不过滤重复框
+    # Use cv2.resize() for proportional scaling
+    image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
 
-    return boxes, scores, class_ids
+    # Create a new canvas and fill it
+    result_image = np.ones((target_height, target_width, 3), dtype=np.uint8) * bg_color
+    offset_x = (target_width - new_width) // 2
+    offset_y = (target_height - new_height) // 2
+    result_image[offset_y:offset_y + new_height, offset_x:offset_x + new_width] = image
+    return result_image, aspect_ratio, offset_x, offset_y
 
 
-def draw_box(frame, u, v, w, h, angle_deg, label):
-    box_points = cv2.boxPoints(((u, v), (w, h), angle_deg))
-    box_points = np.int64(box_points)
-    cv2.drawContours(frame, [box_points], 0, (0, 255, 0), 2)
-    cv2.putText(
-        frame,
-        label,
-        (int(u - w / 2), int(v - h / 2) - 10),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.5,
-        (0, 255, 0),
-        2,
-    )
+class DetectBox:
+    def __init__(self, classId, score, xmin, ymin, xmax, ymax,angle):
+        self.classId = classId
+        self.score = score
+        self.xmin = xmin
+        self.ymin = ymin
+        self.xmax = xmax
+        self.ymax = ymax
+        self.angle=angle
 
-<<<<<<< HEAD
-def main():
-    config_yaml = yaml.safe_load(
-        open(
-            os.path.join(
-                os.path.dirname(os.path.dirname(__file__)),
-                "config.yaml",
-            ),
-            encoding="utf-8",
-        )
-    )
-    model_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        config_yaml.get("classification_YOLO_model_path", ["best.rknn_lite"])[0]
-    )
-    default_conf_thres = config_yaml.get("default_conf_thres", 0.8)
-=======
+def rotate_rectangle(x1, y1, x2, y2, a):
+    # 计算中心点坐标
+    cx = (x1 + x2) / 2
+    cy = (y1 + y2) / 2
 
-def main():
-    model_path = os.path.join(
-        os.path.dirname(os.path.dirname(__file__)),
-        get_config_value("classification_YOLO_model_path", ["best.rknn_lite"])[0],
-    )
-    default_conf_thres = get_config_value("default_conf_thres", 0.8)
->>>>>>> 84e04f9ccc792cf665ae1f8b57f939fecf298875
+    # 将角度转换为弧度
+    # a = math.radians(a)
+    # 对每个顶点进行旋转变换
+    x1_new = int((x1 - cx) * math.cos(a) - (y1 - cy) * math.sin(a) + cx)
+    y1_new = int((x1 - cx) * math.sin(a) + (y1 - cy) * math.cos(a) + cy)
 
-    # Load rknn_lite model
-    rknn_lite = RKNNLite()
-    # Load RKNN model
-    print('--> Load RKNN model')
-    ret = rknn_lite.load_rknn(model_path)
+    x2_new = int((x2 - cx) * math.cos(a) - (y2 - cy) * math.sin(a) + cx)
+    y2_new = int((x2 - cx) * math.sin(a) + (y2 - cy) * math.cos(a) + cy)
+
+    x3_new = int((x1 - cx) * math.cos(a) - (y2 - cy) * math.sin(a) + cx)
+    y3_new = int((x1 - cx) * math.sin(a) + (y2 - cy) * math.cos(a) + cy)
+
+    x4_new =int( (x2 - cx) * math.cos(a) - (y1 - cy) * math.sin(a) + cx)
+    y4_new =int( (x2 - cx) * math.sin(a) + (y1 - cy) * math.cos(a) + cy)
+    return [(x1_new, y1_new), (x3_new, y3_new),(x2_new, y2_new) ,(x4_new, y4_new)]
+
+
+
+def intersection(g, p):
+    g=np.asarray(g)
+    p=np.asarray(p)
+    g = Polygon(g[:8].reshape((4, 2)))
+    p = Polygon(p[:8].reshape((4, 2)))
+    if not g.is_valid or not p.is_valid:
+        return 0
+    inter = Polygon(g).intersection(Polygon(p)).area
+    union = g.area + p.area - inter
+    if union == 0:
+        return 0
+    else:
+        return inter/union
+
+def NMS(detectResult):
+    predBoxs = []
+
+    sort_detectboxs = sorted(detectResult, key=lambda x: x.score, reverse=True)
+    for i in range(len(sort_detectboxs)):
+        xmin1 = sort_detectboxs[i].xmin
+        ymin1 = sort_detectboxs[i].ymin
+        xmax1 = sort_detectboxs[i].xmax
+        ymax1 = sort_detectboxs[i].ymax
+        classId = sort_detectboxs[i].classId
+        angle = sort_detectboxs[i].angle
+        p1=rotate_rectangle(xmin1, ymin1, xmax1, ymax1, angle)
+        p1=np.array(p1).reshape(-1)
+        
+        if sort_detectboxs[i].classId != -1:
+            predBoxs.append(sort_detectboxs[i])
+            for j in range(i + 1, len(sort_detectboxs), 1):
+                if classId == sort_detectboxs[j].classId:
+                    xmin2 = sort_detectboxs[j].xmin
+                    ymin2 = sort_detectboxs[j].ymin
+                    xmax2 = sort_detectboxs[j].xmax
+                    ymax2 = sort_detectboxs[j].ymax
+                    angle2 = sort_detectboxs[j].angle
+                    p2=rotate_rectangle(xmin2, ymin2, xmax2, ymax2, angle2)
+                    p2=np.array(p2).reshape(-1)
+                    iou=intersection(p1, p2)
+                    if iou > nmsThresh:
+                        sort_detectboxs[j].classId = -1
+    return predBoxs
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+def softmax(x, axis=-1):
+    # 将输入向量减去最大值以提高数值稳定性
+    exp_x = np.exp(x - np.max(x, axis=axis, keepdims=True))
+    return exp_x / np.sum(exp_x, axis=axis, keepdims=True)
+
+
+
+def process(out,model_w,model_h,stride,angle_feature,index,scale_w=1,scale_h=1):
+    class_num=len(CLASSES)
+    angle_feature=angle_feature.reshape(-1)
+    xywh=out[:,:64,:]
+    conf=sigmoid(out[:,64:,:])
+    out=[]
+    conf=conf.reshape(-1)
+    for ik in range(model_h*model_w*class_num):
+        if conf[ik]>objectThresh:
+            w=ik%model_w
+            h=(ik%(model_w*model_h))//model_w
+            c=ik//(model_w*model_h)
+            xywh_=xywh[0,:,(h*model_w)+w] #[1,64,1]
+            xywh_=xywh_.reshape(1,4,16,1)
+            data=np.array([i for i in range(16)]).reshape(1,1,16,1)
+            xywh_=softmax(xywh_,2)
+            xywh_ = np.multiply(data, xywh_)
+            xywh_ = np.sum(xywh_, axis=2, keepdims=True).reshape(-1)
+            xywh_add=xywh_[:2]+xywh_[2:]
+            xywh_sub=(xywh_[2:]-xywh_[:2])/2
+            angle_feature_= (angle_feature[index+(h*model_w)+w]-0.25)*3.1415927410125732
+            angle_feature_cos=math.cos(angle_feature_)
+            angle_feature_sin=math.sin(angle_feature_)
+            xy_mul1=xywh_sub[0] * angle_feature_cos
+            xy_mul2=xywh_sub[1] * angle_feature_sin
+            xy_mul3=xywh_sub[0] * angle_feature_sin
+            xy_mul4=xywh_sub[1] * angle_feature_cos
+            xy=xy_mul1-xy_mul2,xy_mul3+xy_mul4
+            xywh_1=np.array([(xy_mul1-xy_mul2)+w+0.5,(xy_mul3+xy_mul4)+h+0.5,xywh_add[0],xywh_add[1]])
+            xywh_=xywh_1*stride
+            xmin = (xywh_[0] - xywh_[2] / 2) * scale_w
+            ymin = (xywh_[1] - xywh_[3] / 2) * scale_h
+            xmax = (xywh_[0] + xywh_[2] / 2) * scale_w
+            ymax = (xywh_[1] + xywh_[3] / 2) * scale_h
+            box = DetectBox(c,conf[ik], xmin, ymin, xmax, ymax,angle_feature_)
+            out.append(box)
+    return out
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='RetinaFace Python Demo', add_help=True)
+    # basic params
+    parser.add_argument('--model_path', type=str, default="./object_detect/yolov8-obb.rknn",
+                        help='model path, could be .rknn file')
+    parser.add_argument('--target', type=str,
+                        default=None, help='target RKNPU platform')
+    parser.add_argument('--device_id', type=str,
+                        default=None, help='device id')
+    args = parser.parse_args()
+
+    # Create RKNNLite object
+    rknn = RKNNLite(verbose=True)
+
+    # Load RKNNLite model
+    ret = rknn.load_rknn(args.model_path)
     if ret != 0:
-        print('Load RKNN model failed')
+        print('Load RKNNLite model \"{}\" failed!'.format(args.model_path))
         exit(ret)
+    print('done')
+
     # Init runtime environment
     print('--> Init runtime environment')
-    ret = rknn_lite.init_runtime(core_mask=RKNNLite.NPU_CORE_0)
+    ret = rknn.init_runtime()
+    # ret = rknn.init_runtime(target=args.target, device_id=args.device_id)
     if ret != 0:
-        print('Init runtime environment failed')
+        print('Init runtime environment failed!')
         exit(ret)
+    print('done')
+
+    # Set inputs
+    img = cv2.imread('./object_detect/image.png')
+
+    letterbox_img, aspect_ratio, offset_x, offset_y = letterbox_resize(img, (640,640), 114)  # letterbox缩放
+    infer_img = letterbox_img[..., ::-1]  # BGR2RGB
+    # 添加批次维度 (HWC -> NHWC)
+    infer_img = np.expand_dims(infer_img, axis=0)
+
+    # Inference
+    print('--> Running model')
+    start_time = time.time()
     
-    
-    # Open camera
-    camera = Camera(color=True, depth=False)
+    results = rknn.inference(inputs=[infer_img])
 
-    while True:
-        start_time = time.time()
-        frames = camera.get_frames()
-        end_time = time.time()
-        print(f"get frames time: {end_time - start_time:.3f} s")
-        if frames.get("color") is None:
-            print("Failed to grab frame")
-            continue
+    outputs=[]
+    for x in results[:-1]:
+        print(f"x.shape: {x.shape}")
+        index,stride=0,0
+        if x.shape[2]==20:
+            stride=32
+            index=20*4*20*4+20*2*20*2
+        if x.shape[2]==40:
+            stride=16
+            index=20*4*20*4
+        if x.shape[2]==80:
+            stride=8
+            index=0
+        feature=x.reshape(1,x.shape[1],-1)
+        output=process(feature,x.shape[3],x.shape[2],stride,results[-1],index)
+        outputs=outputs+output
+    predbox = NMS(outputs)
 
-        frame = frames["color"]
+    for index in range(len(predbox)):
+        xmin = int((predbox[index].xmin-offset_x)/aspect_ratio)
+        ymin = int((predbox[index].ymin-offset_y)/aspect_ratio)
+        xmax = int((predbox[index].xmax-offset_x)/aspect_ratio)
+        ymax = int((predbox[index].ymax-offset_y)/aspect_ratio)
+        classId = predbox[index].classId
+        score = predbox[index].score
+        angle = predbox[index].angle
+        points=rotate_rectangle(xmin,ymin,xmax,ymax,angle)
+        cv2.polylines(img, [np.asarray(points, dtype=int)], True,  (0, 255, 0), 1)
 
-        # Preprocess
-        input_frame = preprocess_frame(frame, input_size=(640, 640))  # 根据你的模型调整
-        # Inference
-        # print(input_frame.shape)
-        start_time = time.time()
-        outputs = rknn_lite.inference(inputs=[input_frame])
-        end_time = time.time()
-        print(f"Inference : {end_time - start_time:.3f} s")
-        # outputs 是 list of numpy arrays，通常只有一个输出
-        if len(outputs) == 0:
-            continue
-        raw_output = outputs[0]  # shape: [1, N, 7] 或类似
-
-        # Postprocess
-        try:
-            boxes, scores, class_ids = postprocess_rknn_output(
-                raw_output, conf_thres=default_conf_thres
-            )
-        except Exception as e:
-            print(f"Postprocess error: {e}")
-            boxes, scores, class_ids = [], [], []
-
-        annotated_frame = frame.copy()
-        class_names = ["TapScrew", "PanScrew", "ShortPanScrew", "MiniPanScrew", "HexBolt", "HexNut", "BlackHexNut"]  # ⚠️ 替换为你的实际类别名！
-        # 更好的方式：从 config.yaml 读取
-        for box, score, cls_id in zip(boxes, scores, class_ids):
-            x, y, w, h, angle_rad = box
-            angle_deg = np.rad2deg(angle_rad)
-            class_name = class_names[cls_id] if cls_id < len(class_names) else f"cls{cls_id}"
-            draw_box(
-                annotated_frame,
-                x,
-                y,
-                w,
-                h,
-                angle_deg,
-                f"{class_name}: {score:.2f}",
-            )
-
-            print(f"{class_name}: {score:.2f}")
-
-        fps = 1 / (end_time - start_time)
-        cv2.putText(
-            annotated_frame,
-            f"FPS: {fps:.2f}",
-            (10, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            (0, 255, 0),
-            2,
-        )
-
-        # 将窗口最大化
-        cv2.imshow("rknn_lite YOLOv11 OBB Detection", annotated_frame)
-        if cv2.waitKey(1) & 0xFF == 27:  # ESC
-            break
-
-    camera.close()
-    cv2.destroyAllWindows()
-    rknn_lite.release()
-
-
-if __name__ == "__main__":
-    main()
+        ptext = (xmin, ymin)
+        title= CLASSES[classId] + "%.2f" % score
+        cv2.putText(img, title, ptext, cv2.FONT_HERSHEY_DUPLEX, 0.5, (0, 0, 255), 1)
+        
+    end_time = time.time()
+    print('Inference time: {:.2f} ms'.format((end_time - start_time) * 1000))
+    img_path = './object_detect/result.jpg'
+    cv2.imwrite(img_path, img)
+    print("save image in", img_path)
+    # Release
+    rknn.release()
