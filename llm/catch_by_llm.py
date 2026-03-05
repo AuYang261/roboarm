@@ -13,6 +13,7 @@ import concurrent.futures
 from queue import Queue
 from arm.arm_control import Arm
 from threading import Thread
+from typing import Callable, Optional
 
 from llm.llm_detect import LLMDetect, json2box, draw_boxes_on_frame
 
@@ -84,7 +85,10 @@ def catch_by_audio():
 
 
 def catch_by_instruction(
-    frame: cv2.typing.MatLike, instruction: str, queue_output: Queue
+    frame: cv2.typing.MatLike,
+    instruction: str,
+    queue_output: Queue,
+    success_callback: Optional[Callable[[], None]] = None,
 ):
     """根据和画面指令阻塞获取检测结果，执行抓取动作，并将检测结果放入队列中"""
     global arm
@@ -133,15 +137,22 @@ def catch_by_instruction(
                     elif "蓝" in box.class_name or "blue" in box.class_name.lower():
                         print("蓝色积木，放置到蓝色区域")
                         place_pos = class_pos.get("blue_block")
+                    elif "绿" in box.class_name or "green" in box.class_name.lower():
+                        print("绿色积木，放置到绿色区域")
+                        place_pos = class_pos.get("green_block")
                     else:
                         print("未知积木，放置到默认区域")
                         place_pos = class_pos.get("blue_block")
-                    arm.catch_and_place(
-                        target_x + offset * np.cos(gripper_angle_rad),
-                        target_y + offset * np.sin(-gripper_angle_rad),
-                        gripper_angle_rad,
-                        place_pos,
-                    )
+                    if (
+                        arm.catch_and_place(
+                            target_x + offset * np.cos(gripper_angle_rad),
+                            target_y + offset * np.sin(-gripper_angle_rad),
+                            gripper_angle_rad,
+                            place_pos,
+                        )
+                        and success_callback
+                    ):
+                        success_callback()
             if done:
                 break
     else:
@@ -151,6 +162,10 @@ def catch_by_instruction(
 def main():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     instructions = [
+        # "抓取蓝色积木",
+        # "抓取黄色积木",
+        # "抓取红色积木",
+        # "抓取绿色积木",
         "抓取最近的积木",
         "抓取红色积木",
         "抓取最右边的红色积木",
@@ -191,18 +206,26 @@ def main():
             print("Failed to grab frame")
             continue
         if future is None or future.done():
-            future = executor.submit(
-                catch_by_instruction,
-                frame,
-                # instructions[0],
-                instructions[np.random.randint(0, len(instructions))],
-                box_queue,
-            )
+            if len(instructions) > 0:
+                instruction = instructions[0]
+                # instruction = instructions[np.random.randint(0, len(instructions))]
+                future = executor.submit(
+                    catch_by_instruction,
+                    frame,
+                    instruction,
+                    box_queue,
+                    lambda: instructions.remove(instruction),
+                )
+            else:
+                future = executor.submit(
+                    arm.move_to,
+                    get_config_value("default_gripper_aside_pos"),
+                )
         if not thread.is_alive():
             break
     cam.close()
 
 
 if __name__ == "__main__":
-    # main()
-    catch_by_audio()
+    main()
+    # catch_by_audio()
