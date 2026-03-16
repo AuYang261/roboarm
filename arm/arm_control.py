@@ -213,21 +213,17 @@ class Arm:
         pos: List[float],
         gripper_angle_deg: float | int | None = None,
         rot_rad: float | int | None = None,
-        warning: bool = True,
     ):
         """
         机械臂移动到指定位置，单位米
         pos: [x, y, z]
         gripper_angle_deg: 夹爪张开角度，范围0-100，越大越开，单位度，None表示不改变当前角度
         rot_rad: 末端执行器绕z轴旋转角度，单位弧度，None表示不改变当前角度
-        warning: 是否开启z轴位置警告，默认开启
         """
         if not hasattr(self, "chain"):
             raise ValueError("没有机械臂模型，无法使用位置控制")
         if len(pos) != 3:
             raise ValueError("位置参数格式错误，应该是[x, y, z]")
-        if warning and (pos[2] < 0.05 or pos[2] > 0.1):
-            print("Warning: z轴位置建议在0.07米以恰好在桌面上")
         # 控制夹爪角度的舵机逆时针为正，而欧拉角定义为绕z轴顺时针为正，所以这里取负号
         goal_tf = kinpy.Transform(
             pos=np.array(pos), rot=[0, 0, -rot_rad if rot_rad else 0]
@@ -325,7 +321,6 @@ class Arm:
             [target_x, target_y, height + self.catch_raise_height],
             gripper_angle_deg=80,
             rot_rad=rad,
-            warning=False,
         )
         if res is None:
             print("移动到目标位置失败，取消抓取")
@@ -354,7 +349,6 @@ class Arm:
             [target_x, target_y, height + self.catch_raise_height],
             gripper_angle_deg=0,
             rot_rad=rad,
-            warning=False,
         )
         if res is None:
             print("移动到目标位置失败，取消抓取")
@@ -390,7 +384,6 @@ class Arm:
             [target_x, target_y, target_z + self.place_raise_height],
             gripper_angle_deg=0,
             rot_rad=rad,
-            warning=False,
         )
         if res is None:
             print("移动到目标位置失败，取消放置")

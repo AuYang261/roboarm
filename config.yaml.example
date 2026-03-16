@@ -29,7 +29,8 @@ default_gripper_aside_pos:
 # =======大模型=======
 
 # 请求大模型的平台url
-llm_base_url: https://openrouter.ai/api/v1
+# llm_base_url: https://openrouter.ai/api/v1
+llm_base_url: https://api.ohmygpt.com/v1
 
 # 大模型平台的api_key
 llm_api_key: ****
@@ -39,6 +40,9 @@ prompts_file: prompts.toml
 
 # 代理地址，使用代理可能请求失败
 https_proxy: 
+
+# 使用的大模型名称，见https://openrouter.ai/models 或 https://www.ohmygpt.com/models，必须是支持多模态输入的模型
+llm_model: gemini-3.1-flash-image-preview
 
 # 语音转文字APIID
 APPID: 

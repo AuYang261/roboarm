@@ -207,8 +207,8 @@ def main():
             continue
         if future is None or future.done():
             if len(instructions) > 0:
-                instruction = instructions[0]
-                # instruction = instructions[np.random.randint(0, len(instructions))]
+                # instruction = instructions[0]
+                instruction = instructions[np.random.randint(0, len(instructions))]
                 future = executor.submit(
                     catch_by_instruction,
                     frame,

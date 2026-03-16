@@ -78,9 +78,7 @@ def main():
                 arm.move_to_home(gripper_angle_deg=80)
                 arm.disconnect_arm()
                 return
-            arm.move_to(
-                POS[:3], gripper_angle_deg=POS[4], rot_rad=POS[3], warning=False
-            )
+            arm.move_to(POS[:3], gripper_angle_deg=POS[4], rot_rad=POS[3])
         except Exception as e:
             print("Error:", e)
             time.sleep(0.5)
