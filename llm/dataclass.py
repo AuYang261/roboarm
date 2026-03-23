@@ -34,7 +34,7 @@ class DetectedFromLLM:
             raise ValueError("Invalid box parameters, cannot convert to DetectedBox.")
         cx = round(self.box_center_x * img_w)
         cy = round(self.box_center_y * img_h)
-        if get_config_value("RotationCam2Arm", False, False):
+        if get_config_value("RotationCam2Arm"):
             cx = img_w - cx
             cy = img_h - cy
         w = round(self.box_width * img_w)

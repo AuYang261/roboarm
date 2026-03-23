@@ -243,6 +243,60 @@ def get_blue_block_instruction(
     return results
 
 
+def get_red_block_instruction(
+    points_list: list[BoxPoints],
+) -> list[BoxPoints]:
+    """从标注中找到所有红色积木的坐标"""
+    results = []
+    for points in points_list:
+        if points.label == "red_block":
+            results.append(points)
+    return results
+
+
+def get_yellow_block_instruction(
+    points_list: list[BoxPoints],
+) -> list[BoxPoints]:
+    """从标注中找到所有黄色积木的坐标"""
+    results = []
+    for points in points_list:
+        if points.label == "yellow_block":
+            results.append(points)
+    return results
+
+
+def get_left_block_instruction(
+    points_list: list[BoxPoints],
+) -> list[BoxPoints]:
+    """从标注中找到最左的积木的坐标，假设最近的是x坐标最大的"""
+    if not points_list:
+        return []
+    # 求重心x坐标最大的积木
+    left_points = max(
+        points_list,
+        key=lambda p: np.mean(
+            np.array([p.point1, p.point2, p.point3, p.point4], dtype=np.float32)[:, 0]
+        ),
+    )
+    return [left_points]
+
+
+def get_right_block_instruction(
+    points_list: list[BoxPoints],
+) -> list[BoxPoints]:
+    """从标注中找到最右的积木的坐标，假设最近的是x坐标最小的"""
+    if not points_list:
+        return []
+    # 求重心x坐标最小的积木
+    left_points = min(
+        points_list,
+        key=lambda p: np.mean(
+            np.array([p.point1, p.point2, p.point3, p.point4], dtype=np.float32)[:, 0]
+        ),
+    )
+    return [left_points]
+
+
 def get_nearest_block_instruction(
     points_list: list[BoxPoints],
 ) -> list[BoxPoints]:
@@ -284,6 +338,10 @@ async def main():
     # 每条语音指令对应的处理函数
     audio2func = {
         audio_dataset_path / "抓取蓝色积木.m4a": get_blue_block_instruction,
+        audio_dataset_path / "抓取红色积木.m4a": get_red_block_instruction,
+        audio_dataset_path / "抓取黄色积木.m4a": get_yellow_block_instruction,
+        audio_dataset_path / "抓取最左边积木.m4a": get_left_block_instruction,
+        audio_dataset_path / "抓取最右边积木.m4a": get_right_block_instruction,
         audio_dataset_path / "抓取最近的积木.m4a": get_nearest_block_instruction,
     }
     tasks = []
