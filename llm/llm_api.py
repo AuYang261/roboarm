@@ -204,6 +204,23 @@ class LLMAPI:
         return completion.choices[0].message.content, True
 
 
+def inline_schema_refs(schema: dict) -> dict:
+    """将 Pydantic 生成的 JSON Schema 中的 $ref 内联展开，去除 $defs，兼容 Gemini API。"""
+    defs = schema.get("$defs", {})
+
+    def resolve(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            if "$ref" in obj:
+                ref_name = obj["$ref"].split("/")[-1]
+                return resolve(defs[ref_name])
+            return {k: resolve(v) for k, v in obj.items() if k != "$defs"}
+        if isinstance(obj, list):
+            return [resolve(item) for item in obj]
+        return obj
+
+    return resolve(schema)
+
+
 def extract_json_from_markdown(text: str) -> str:
     """
     从可能包含 Markdown 代码围栏的文本中提取 JSON 内容。
@@ -233,7 +250,7 @@ if __name__ == "__main__":
             image_base64,
             "block_detect_prompt",
             debug=True,
-            schema=TypeAdapter(list[DetectedFromLLM]).json_schema(),
+            schema=inline_schema_refs(TypeAdapter(list[DetectedFromLLM]).json_schema()),
         )
         if task is None:
             continue

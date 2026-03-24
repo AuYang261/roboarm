@@ -13,7 +13,7 @@ from concurrent import futures
 import numpy as np
 from typing import Any
 
-from llm.llm_api import LLMAPI, extract_json_from_markdown
+from llm.llm_api import LLMAPI, extract_json_from_markdown, inline_schema_refs
 from llm.dataclass import DetectedBox, DetectedFromLLM
 
 
@@ -115,7 +115,7 @@ if __name__ == "__main__":
     while True:
         response_task, frame = llm_detect.detect_scene(
             prompt_key="block_detect_prompt",
-            schema=TypeAdapter(list[DetectedFromLLM]).json_schema(),
+            schema=inline_schema_refs(TypeAdapter(list[DetectedFromLLM]).json_schema()),
         )
         if response_task and frame is not None:
             while True:

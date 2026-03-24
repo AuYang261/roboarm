@@ -5,14 +5,14 @@ from config_getter import get_config_value
 
 @dataclass
 class DetectedFromLLM:
-    thinking_process: str | None
-    failed: bool | None
     id: int
     class_name: str
     box_center_x: float
     box_center_y: float
     box_width: float
     box_height: float
+    thinking_process: str | None = None
+    failed: bool | None = None
 
     def is_valid(self) -> bool:
         return (

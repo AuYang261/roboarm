@@ -42,7 +42,7 @@ prompts_file: prompts.toml
 https_proxy: 
 
 # 使用的大模型名称，见https://openrouter.ai/models 或 https://www.ohmygpt.com/models，必须是支持多模态输入的模型
-llm_model: gemini-3.1-flash-image-preview
+llm_model: gemini-3-flash-preview
 
 # 语音转文字APIID
 APPID: 
