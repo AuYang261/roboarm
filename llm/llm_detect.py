@@ -13,11 +13,8 @@ from concurrent import futures
 import numpy as np
 from typing import Any
 
-from llm.llm_api import LLMAPI, extract_json_from_markdown, inline_schema_refs
+from llm.llm_api import LLMAPI, extract_json_from_markdown, inline_schema_refs, font
 from llm.dataclass import DetectedBox, DetectedFromLLM
-
-
-font = ImageFont.truetype(r"C:\Windows\Fonts\msyh.ttc", 16)
 
 
 class LLMDetect:

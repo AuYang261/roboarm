@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from config_getter import get_config_value
@@ -22,6 +23,36 @@ from concurrent import futures
 
 from llm.dataclass import DetectedFromLLM
 
+
+def _load_cjk_font(size: int = 16) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    # 优先用 fc-list 动态查找系统中文字体（Linux/macOS，无需额外安装）
+    try:
+        result = subprocess.run(
+            ["fc-list", ":lang=zh", "--format=%{file}\n"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        for line in result.stdout.splitlines():
+            path = line.strip()
+            if path and os.path.exists(path):
+                return ImageFont.truetype(path, size)
+    except Exception:
+        pass
+    # 回退到已知固定路径
+    candidates = [
+        r"C:\Windows\Fonts\msyh.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
+
+
+font = _load_cjk_font(16)
 
 class LLMAPI:
 
@@ -268,7 +299,6 @@ if __name__ == "__main__":
     print(f"Detected {len(boxes)} boxes.")
     img = Image.open(image_path)
     width, height = img.size
-    font = ImageFont.truetype(r"C:\Windows\Fonts\msyh.ttc", 16)
     for box in boxes:
         if not box.is_valid():
             continue
