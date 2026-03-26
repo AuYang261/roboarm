@@ -1,5 +1,6 @@
 import os
 import sys
+import subprocess
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from config_getter import get_config_value
@@ -22,6 +23,36 @@ from concurrent import futures
 
 from llm.dataclass import DetectedFromLLM
 
+
+def _load_cjk_font(size: int = 16) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    # 优先用 fc-list 动态查找系统中文字体（Linux/macOS，无需额外安装）
+    try:
+        result = subprocess.run(
+            ["fc-list", ":lang=zh", "--format=%{file}\n"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        for line in result.stdout.splitlines():
+            path = line.strip()
+            if path and os.path.exists(path):
+                return ImageFont.truetype(path, size)
+    except Exception:
+        pass
+    # 回退到已知固定路径
+    candidates = [
+        r"C:\Windows\Fonts\msyh.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, size)
+    return ImageFont.load_default()
+
+
+font = _load_cjk_font(16)
 
 class LLMAPI:
 
@@ -110,7 +141,8 @@ class LLMAPI:
         prompt_key: str,
         replace_map: dict[str, str] | None = None,
         # model: str = "qwen/qwen3-vl-235b-a22b-instruct",
-        model: str = "google/gemini-3-flash-preview",
+        # model: str = "google/gemini-3-flash-preview",
+        model: str = get_config_value("llm_model"),
         debug: bool = False,
         schema: dict[str, Any] | None = None,
         temperature: float = 0.0,
@@ -203,6 +235,23 @@ class LLMAPI:
         return completion.choices[0].message.content, True
 
 
+def inline_schema_refs(schema: dict) -> dict:
+    """将 Pydantic 生成的 JSON Schema 中的 $ref 内联展开，去除 $defs，兼容 Gemini API。"""
+    defs = schema.get("$defs", {})
+
+    def resolve(obj: Any) -> Any:
+        if isinstance(obj, dict):
+            if "$ref" in obj:
+                ref_name = obj["$ref"].split("/")[-1]
+                return resolve(defs[ref_name])
+            return {k: resolve(v) for k, v in obj.items() if k != "$defs"}
+        if isinstance(obj, list):
+            return [resolve(item) for item in obj]
+        return obj
+
+    return resolve(schema)
+
+
 def extract_json_from_markdown(text: str) -> str:
     """
     从可能包含 Markdown 代码围栏的文本中提取 JSON 内容。
@@ -232,7 +281,7 @@ if __name__ == "__main__":
             image_base64,
             "block_detect_prompt",
             debug=True,
-            schema=TypeAdapter(list[DetectedFromLLM]).json_schema(),
+            schema=inline_schema_refs(TypeAdapter(list[DetectedFromLLM]).json_schema()),
         )
         if task is None:
             continue
@@ -250,7 +299,6 @@ if __name__ == "__main__":
     print(f"Detected {len(boxes)} boxes.")
     img = Image.open(image_path)
     width, height = img.size
-    font = ImageFont.truetype(r"C:\Windows\Fonts\msyh.ttc", 16)
     for box in boxes:
         if not box.is_valid():
             continue

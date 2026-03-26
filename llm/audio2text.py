@@ -428,27 +428,28 @@ def audio_file2text(audio_path: str) -> str:
 
 
 if __name__ == "__main__":
-    with open(os.path.join(os.path.dirname(__file__), "test.m4a"), "rb") as f:
-        audio_bytes = f.read()
+    if os.path.exists(os.path.join(os.path.dirname(__file__), "test.m4a")):
+        with open(os.path.join(os.path.dirname(__file__), "test.m4a"), "rb") as f:
+            audio_bytes = f.read()
 
-    audio_bytes = mp3_bytes_to_pcm_16k_mono_s16le(audio_bytes, format="m4a")
+        audio_bytes = mp3_bytes_to_pcm_16k_mono_s16le(audio_bytes, format="m4a")
 
-    wsParam = Ws_Param(
-        APPID=get_config_value("APPID"),
-        APISecret=get_config_value("APISecret"),
-        APIKey=get_config_value("APIKey"),
-        AudioBytes=audio_bytes,
-    )
-    websocket.enableTrace(False)
-    wsUrl = wsParam.create_url()
-    ws = websocket.WebSocketApp(
-        wsUrl,
-        on_message=on_message,
-        on_error=on_error,
-        on_close=on_close,
-    )
-    ws.on_open = lambda ws: thread.start_new_thread(send, (ws, wsParam))
-    ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
+        wsParam = Ws_Param(
+            APPID=get_config_value("APPID"),
+            APISecret=get_config_value("APISecret"),
+            APIKey=get_config_value("APIKey"),
+            AudioBytes=audio_bytes,
+        )
+        websocket.enableTrace(False)
+        wsUrl = wsParam.create_url()
+        ws = websocket.WebSocketApp(
+            wsUrl,
+            on_message=on_message,
+            on_error=on_error,
+            on_close=on_close,
+        )
+        ws.on_open = lambda ws: thread.start_new_thread(send, (ws, wsParam))
+        ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
 
     print("=== 麦克风实时识别 ===")
 

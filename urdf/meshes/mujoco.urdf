@@ -5,7 +5,7 @@
 <!-- =================================================================================== -->
 <robot name="low_cost_robot">
   <mujoco>
-    <compiler meshdir="./meshes" balanceinertia="true" discardvisual="false"/>
+    <compiler meshdir="./" balanceinertia="true" discardvisual="false"/>
   </mujoco>
   <link name="base_link">
     <inertial>

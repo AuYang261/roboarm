@@ -13,11 +13,8 @@ from concurrent import futures
 import numpy as np
 from typing import Any
 
-from llm.llm_api import LLMAPI, extract_json_from_markdown
+from llm.llm_api import LLMAPI, extract_json_from_markdown, inline_schema_refs, font
 from llm.dataclass import DetectedBox, DetectedFromLLM
-
-
-font = ImageFont.truetype(r"C:\Windows\Fonts\msyh.ttc", 16)
 
 
 class LLMDetect:
@@ -54,7 +51,7 @@ class LLMDetect:
         schema: dict[str, Any] | None = None,
     ) -> "futures.Future[ChatCompletion]|None":
         # 旋转180度以适应摄像头安装方向，需要根据实际安装情况调整
-        if get_config_value("RotationCam2Arm", False, False):
+        if get_config_value("RotationCam2Arm"):
             frame = cv2.rotate(frame, cv2.ROTATE_180)
         _, img_encoded = cv2.imencode(".jpg", frame)
         image_base64 = base64.b64encode(img_encoded.tobytes()).decode("utf-8")
@@ -115,7 +112,7 @@ if __name__ == "__main__":
     while True:
         response_task, frame = llm_detect.detect_scene(
             prompt_key="block_detect_prompt",
-            schema=TypeAdapter(list[DetectedFromLLM]).json_schema(),
+            schema=inline_schema_refs(TypeAdapter(list[DetectedFromLLM]).json_schema()),
         )
         if response_task and frame is not None:
             while True:

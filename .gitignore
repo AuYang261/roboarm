@@ -9,6 +9,7 @@ temfile/
 classification/dataset_process/
 temp/
 comparison_results/
+sim/isaacSimKoch/
 
 *.txt
 .env
@@ -23,3 +24,4 @@ object_detect/data.yaml
 
 *.mp3
 *.wav
+*.zip

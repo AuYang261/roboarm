@@ -155,25 +155,23 @@ def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
 
 
 def test_moveto(chain: kinpy.chain.SerialChain, M, image_point):
-    
+
     # global arm
     arm = Arm()
     arm.move_to_home(gripper_angle_deg=None)
-    arm.move_to
     time.sleep(1)
-    
+
     x = image_point[0]
     y = image_point[1]
-    
+
     target_x, target_y = arm.pixel2pos(x, y)
     print(f"Clicked image point: ({x}, {y}), Mapped arm position: ({target_x}, {target_y})")
     arm.move_to(
-            [target_x, target_y, 0.07],
-            gripper_angle_deg=80,
-            rot_rad=0,
-            warning=False,
-        )
-    
+        [target_x, target_y, 0.07],
+        gripper_angle_deg=80,
+        rot_rad=0,
+    )
+
     # time.sleep(2)
     # # 归0
     # arm.move_to_home(gripper_angle_deg=None)

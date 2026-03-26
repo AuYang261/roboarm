@@ -29,7 +29,8 @@ default_gripper_aside_pos:
 # =======大模型=======
 
 # 请求大模型的平台url
-llm_base_url: https://openrouter.ai/api/v1
+# llm_base_url: https://openrouter.ai/api/v1
+llm_base_url: https://api.ohmygpt.com/v1
 
 # 大模型平台的api_key
 llm_api_key: ****
@@ -37,8 +38,11 @@ llm_api_key: ****
 # 提示词文件
 prompts_file: prompts.toml
 
-# 代理地址，使用代理可能请求失败
+# 代理地址，如请求大模型失败可设置或取消代理
 https_proxy: 
+
+# 使用的大模型名称，见https://openrouter.ai/models 或 https://www.ohmygpt.com/models，必须是支持多模态输入的模型
+llm_model: gemini-3-flash-preview
 
 # 语音转文字APIID
 APPID: 
@@ -50,6 +54,7 @@ APISecret:
 APIKey: 
 
 # 如果相机是在机械臂对面，视角和机械臂视角相反（机械臂在画面上方），则设为true
+# 主要影响大模型的左右判断
 RotationCam2Arm: true
 
 
@@ -58,7 +63,6 @@ RotationCam2Arm: true
 # 以项目根目录为基准
 classification_YOLO_model_path:
   - classification\object_detect\runs\积木方块\best.pt
-#  - classification\object_detect\runs\积木螺丝国际象棋\best.pt
 
 # 默认YOLO识别置信度阈值
 default_conf_thres: 0.85

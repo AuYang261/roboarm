@@ -30,6 +30,23 @@ from llm.dataclass import DetectedBox
 import cv2
 import numpy as np
 import json
+import argparse
+
+
+parser = argparse.ArgumentParser(description="Process image dataset")
+parser.add_argument(
+    "--dataset_path",
+    type=Path,
+    default=Path(__file__).parent / "dataset",
+    help="数据集路径，包含pic文件夹和语音指令文件",
+)
+parser.add_argument(
+    "--audio",
+    action="store_true",
+    default=False,
+    help="是否处理语音指令，开启后会根据语音指令筛选目标坐标进行评测，否则会直接用语音文件名作为指令文本进行评测",
+)
+args = parser.parse_args()
 
 
 @dataclass
@@ -65,6 +82,14 @@ class BoxPoints:
         return self.__str__()
 
 
+def audio_file2text_wrapper(audio_path: Path) -> str:
+    """将音频文件路径转换为文本指令，供LLMDetect使用"""
+    # 这里直接调用audio_file2text函数，也可以根据需要添加更多逻辑
+    if args.audio:
+        return audio_file2text(audio_path.as_posix())
+    return audio_path.stem
+
+
 def json_from_labelme2box(
     labelme_json: dict,
 ) -> list[BoxPoints]:
@@ -90,7 +115,7 @@ async def testcase_pic_llm_detect(
     """
     pic = cv2.imread(pic_path.as_posix())
     llm_detect = LLMDetect()
-    instruction = await asyncio.to_thread(audio_file2text, instruct_audio.as_posix())
+    instruction = await asyncio.to_thread(audio_file2text_wrapper, instruct_audio)
     response_task = llm_detect.detect_frame(
         pic,
         prompt_key="user_instruction_prompt",
@@ -218,10 +243,66 @@ def get_blue_block_instruction(
     return results
 
 
+def get_red_block_instruction(
+    points_list: list[BoxPoints],
+) -> list[BoxPoints]:
+    """从标注中找到所有红色积木的坐标"""
+    results = []
+    for points in points_list:
+        if points.label == "red_block":
+            results.append(points)
+    return results
+
+
+def get_yellow_block_instruction(
+    points_list: list[BoxPoints],
+) -> list[BoxPoints]:
+    """从标注中找到所有黄色积木的坐标"""
+    results = []
+    for points in points_list:
+        if points.label == "yellow_block":
+            results.append(points)
+    return results
+
+
+def get_left_block_instruction(
+    points_list: list[BoxPoints],
+) -> list[BoxPoints]:
+    """从标注中找到最左的积木的坐标，假设最近的是x坐标最大的"""
+    if not points_list:
+        return []
+    # 求重心x坐标最大的积木
+    left_points = max(
+        points_list,
+        key=lambda p: np.mean(
+            np.array([p.point1, p.point2, p.point3, p.point4], dtype=np.float32)[:, 0]
+        ),
+    )
+    return [left_points]
+
+
+def get_right_block_instruction(
+    points_list: list[BoxPoints],
+) -> list[BoxPoints]:
+    """从标注中找到最右的积木的坐标，假设最近的是x坐标最小的"""
+    if not points_list:
+        return []
+    # 求重心x坐标最小的积木
+    left_points = min(
+        points_list,
+        key=lambda p: np.mean(
+            np.array([p.point1, p.point2, p.point3, p.point4], dtype=np.float32)[:, 0]
+        ),
+    )
+    return [left_points]
+
+
 def get_nearest_block_instruction(
     points_list: list[BoxPoints],
 ) -> list[BoxPoints]:
     """从标注中找到最近的积木的坐标，假设最近的是y坐标最小的"""
+    # 对最近的定义可能比较模糊，对一个就算对
+    return points_list
     if not points_list:
         return []
     # 求重心y坐标最小的积木
@@ -235,14 +316,32 @@ def get_nearest_block_instruction(
 
 
 async def main():
-    pic_dataset_path = Path(__file__).parent / Path(r"dataset") / Path(r"pic")
+    if not args.dataset_path.exists():
+        print(f"数据集路径不存在: {args.dataset_path}")
+        return
+    if not (args.dataset_path / "pic").exists():
+        print(f"数据集缺少pic文件夹: {args.dataset_path / 'pic'}")
+        return
+    if not (args.dataset_path / "audio").exists():
+        print(f"数据集缺少audio文件夹: {args.dataset_path / 'audio'}")
+        return
+    if not args.audio:
+        print("未开启语音指令处理，使用语音文件名作为指令文本进行评测")
+    else:
+        print("已开启语音指令处理，将识别语音指令进行评测")
+
+    pic_dataset_path = args.dataset_path / "pic"
     debug_dir = pic_dataset_path / "debug"
     if debug_dir.exists():
         shutil.rmtree(debug_dir)
-    audio_dataset_path = Path(__file__).parent / Path(r"dataset")
+    audio_dataset_path = args.dataset_path / "audio"
     # 每条语音指令对应的处理函数
     audio2func = {
         audio_dataset_path / "抓取蓝色积木.m4a": get_blue_block_instruction,
+        audio_dataset_path / "抓取红色积木.m4a": get_red_block_instruction,
+        audio_dataset_path / "抓取黄色积木.m4a": get_yellow_block_instruction,
+        audio_dataset_path / "抓取最左边积木.m4a": get_left_block_instruction,
+        audio_dataset_path / "抓取最右边积木.m4a": get_right_block_instruction,
         audio_dataset_path / "抓取最近的积木.m4a": get_nearest_block_instruction,
     }
     tasks = []

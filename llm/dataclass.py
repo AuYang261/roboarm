@@ -5,14 +5,14 @@ from config_getter import get_config_value
 
 @dataclass
 class DetectedFromLLM:
-    thinking_process: str | None
-    failed: bool | None
     id: int
     class_name: str
     box_center_x: float
     box_center_y: float
     box_width: float
     box_height: float
+    thinking_process: str | None = None
+    failed: bool | None = None
 
     def is_valid(self) -> bool:
         return (
@@ -34,7 +34,7 @@ class DetectedFromLLM:
             raise ValueError("Invalid box parameters, cannot convert to DetectedBox.")
         cx = round(self.box_center_x * img_w)
         cy = round(self.box_center_y * img_h)
-        if get_config_value("RotationCam2Arm", False, False):
+        if get_config_value("RotationCam2Arm"):
             cx = img_w - cx
             cy = img_h - cy
         w = round(self.box_width * img_w)
