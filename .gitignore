@@ -10,6 +10,7 @@ classification/dataset_process/
 temp/
 comparison_results/
 sim/isaacSimKoch/
+IsaacLabs/
 
 *.txt
 .env

@@ -32,7 +32,6 @@ except ImportError:
     keyboard.Listener = _DummyListener
     sys.modules['pynput.keyboard'] = keyboard
 
-
 class KeyboardController:
     """键盘控制器，使用 pynput 监听按键状态"""
 
@@ -216,7 +215,6 @@ def _apply_pd_control(sim):
     for i in range(sim.model.nu):
         adjusted = sim.target_joint_positions[i] + (sim.kd / sim.kp) * (-sim.data.qvel[i])
         sim.data.ctrl[i] = np.clip(adjusted, -3.14159, 3.14159)
-
 
 def main():
     """主函数，创建仿真模型并运行"""
