@@ -49,6 +49,8 @@
           <body name="link4_1" pos="0.000125 0.090467 0.002747">
             <inertial pos="-0.00473856 8.6083e-06 -0.0265782" quat="0.653281 0.270598 0.270598 0.653281" mass="0.154644" diaginertia="3.9e-05 2.7e-05 2.1e-05"/>
             <joint name="joint4" pos="0 0 0" axis="1 0 0"/>
+            <!-- 臂上摄像头：位于 link4_1 上方，朝夹爪中心方向看 -->
+            <camera name="arm_cam" pos="0 0.06 0" xyaxes="1 0 0 0 0.8 -0.6"/>
             <geom pos="-0.000175 -0.105258 -0.167394" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="link4_1"/>
             <geom pos="-0.000175 -0.105258 -0.167394" quat="1 0 0 0" type="mesh" mesh="link4_1"/>
             <body name="gripper_static_1" pos="0.001353 7e-06 -0.045">

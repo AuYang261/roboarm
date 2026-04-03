@@ -565,7 +565,7 @@ def replay():
     sim = SimMujocoModel(model_path)
     sim.add_view('default', {'distance': 3.0, 'lookat': [0.0, 0.0, 0.0], 'elevation': -20.0, 'azimuth': 135.0})
     sim.add_view('top',     {'distance': 2.0, 'lookat': [0.0, 0.0, 0.0], 'elevation': -90.0, 'azimuth': 0.0})
-    sim.add_view('follow',  {'fixed_camera': 'gripper_cam'})
+    sim.add_view('follow',  {'fixed_camera': 'arm_cam'})
 
     # 选择视角
     print("\n=== 选择回放视角 ===")
