@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.camera_api import Camera
@@ -10,6 +11,7 @@ from llm.audio2text import get_audio_text
 import cv2
 import numpy as np
 import concurrent.futures
+import time
 from queue import Queue
 from arm.arm_control import Arm
 from threading import Thread
@@ -17,8 +19,39 @@ from typing import Callable, Optional
 
 from llm.llm_detect import LLMDetect, json2box, draw_boxes_on_frame
 
-arm = Arm()
+CATCH_STATS_FILE = os.path.join(os.path.dirname(__file__), "catch_stats.json")
 
+# 每次启动从0开始统计
+catch_stats = {"total": 0, "success": 0, "fail": 0, "success_rate": "", "history": []}
+
+
+def record_catch_result(instruction: str, target_name: str, success: bool):
+    """记录一次抓取结果并立即写入文件"""
+    catch_stats["total"] += 1
+    if success:
+        catch_stats["success"] += 1
+    else:
+        catch_stats["fail"] += 1
+    rate = round(catch_stats["success"] / catch_stats["total"] * 100, 2)
+    catch_stats["success_rate"] = f"{rate}%"
+    catch_stats["history"].append(
+        {
+            "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "instruction": instruction,
+            "target": target_name,
+            "success": success,
+        }
+    )
+    with open(CATCH_STATS_FILE, "w", encoding="utf-8") as f:
+        json.dump(catch_stats, f, ensure_ascii=False, indent=2)
+    print(
+        f"[统计] 总计: {catch_stats['total']}, 成功: {catch_stats['success']}, "
+        f"失败: {catch_stats['fail']}, 成功率: {rate}%"
+    )
+
+
+arm = Arm()
+llm_detect = LLMDetect()
 
 def catch_by_audio():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -91,14 +124,15 @@ def catch_by_instruction(
     success_callback: Optional[Callable[[], None]] = None,
 ):
     """根据和画面指令阻塞获取检测结果，执行抓取动作，并将检测结果放入队列中"""
-    global arm
+    global arm, llm_detect
     print("Instruction:", instruction)
     class_pos = get_config_value("class_pos")
     offset = get_config_value("catch_offset")
     default_gripper_aside_pos = get_config_value("default_gripper_aside_pos")
-    llm_detect = LLMDetect()
     arm.move_to(default_gripper_aside_pos, 80)
+    time.sleep(0.5)
     print("LLM Detecting...")
+    start = time.time()
     response_task = llm_detect.detect_frame(
         frame,
         prompt_key="user_instruction_prompt",
@@ -111,7 +145,8 @@ def catch_by_instruction(
                 response_task, blocking=False
             )
             if response:
-                print("LLM Response:", response)
+                print(f"Detect used {time.time()-start}s")
+                # print("LLM Response:", response)
                 box = json2box(response, img_w=frame.shape[1], img_h=frame.shape[0])
                 print("检测到的目标:", box)
                 if box:
@@ -143,15 +178,14 @@ def catch_by_instruction(
                     else:
                         print("未知积木，放置到默认区域")
                         place_pos = class_pos.get("blue_block")
-                    if (
-                        arm.catch_and_place(
-                            target_x + offset * np.cos(gripper_angle_rad),
-                            target_y + offset * np.sin(-gripper_angle_rad),
-                            gripper_angle_rad,
-                            place_pos,
-                        )
-                        and success_callback
-                    ):
+                    catch_success = arm.catch_and_place(
+                        target_x + offset * np.cos(gripper_angle_rad),
+                        target_y + offset * np.sin(-gripper_angle_rad),
+                        gripper_angle_rad,
+                        place_pos,
+                    )
+                    record_catch_result(instruction, box.class_name, catch_success)
+                    if catch_success and success_callback:
                         success_callback()
             if done:
                 break
@@ -159,7 +193,7 @@ def catch_by_instruction(
         print(f"No response({response_task}) or frame({frame}) available.")
 
 
-def main():
+def catch_by_text_instruction():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     instructions = [
         # "抓取蓝色积木",
@@ -185,8 +219,6 @@ def main():
         while True:
             if not box_queue.empty():
                 box = box_queue.get(block=False)
-                if box:
-                    print("消费到的目标:", box)
             if frame is None:
                 continue
             frame_draw = draw_boxes_on_frame(
@@ -227,5 +259,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    catch_by_text_instruction()
     # catch_by_audio()
