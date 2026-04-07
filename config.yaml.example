@@ -30,9 +30,10 @@ default_gripper_aside_pos:
 
 # 请求大模型的平台url
 # llm_base_url: https://openrouter.ai/api/v1
-llm_base_url: https://api.ohmygpt.com/v1
+# llm_base_url: https://api.ohmygpt.com/v1
+llm_base_url: http://192.168.0.19:8001/v1
 
-# 大模型平台的api_key
+# 大模型平台的api_key，本地部署则不需要
 llm_api_key: ****
 
 # 提示词文件
@@ -42,9 +43,24 @@ prompts_file: prompts.toml
 https_proxy: 
 
 # 使用的大模型名称，见https://openrouter.ai/models 或 https://www.ohmygpt.com/models，必须是支持多模态输入的模型
-llm_model: gemini-3-flash-preview
+# llm_model: gemini-3-flash-preview
+# 或指定本地部署的模型
+llm_model: output/merged-qwen3.5-9b-graspdet
 
-# 语音转文字APIID
+# 如果相机是在机械臂对面，视角和机械臂视角相反（机械臂在画面上方），则设为true
+# 主要影响大模型的左右判断
+RotationCam2Arm: true
+
+
+# 语音转文字后端: "xunfei" 使用讯飞，其他值使用自部署语音转文字服务
+audio2text_backend: no-xunfei
+
+# 自部署语音转文字服务地址
+whisper_url: http://192.168.0.19:8000
+whisper_username: wowrobo
+whisper_password: wowrobo
+
+# 语音转文字APIID（讯飞）
 APPID: 
 
 # 语音转文字APISecret
@@ -52,10 +68,6 @@ APISecret:
 
 # 语音转文字APIKey
 APIKey: 
-
-# 如果相机是在机械臂对面，视角和机械臂视角相反（机械臂在画面上方），则设为true
-# 主要影响大模型的左右判断
-RotationCam2Arm: true
 
 
 # =======物品分类场景=======

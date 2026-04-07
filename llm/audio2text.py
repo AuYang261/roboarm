@@ -1,17 +1,8 @@
 # -*- coding:utf-8 -*-
 
-#  语音听写流式 WebAPI 接口调用示例 接口文档（必看）：https://doc.xfyun.cn/rest_api/语音听写（流式版）.html
-#  webapi 听写服务参考帖子（必看）：http://bbs.xfyun.cn/forum.php?mod=viewthread&tid=38947&extra=
-#  语音听写流式WebAPI 服务，热词使用方式：登陆开放平台https://www.xfyun.cn/后，找到控制台--我的应用---语音听写（流式）---服务管理--个性化热词，
-#  设置热词
-#  注意：热词只能在识别的时候会增加热词的识别权重，需要注意的是增加相应词条的识别率，但并不是绝对的，具体效果以您测试为准。
-#  语音听写流式WebAPI 服务，方言试用方法：登陆开放平台https://www.xfyun.cn/后，找到控制台--我的应用---语音听写（流式）---服务管理--识别语种列表
-#  可添加语种或方言，添加后会显示该方言的参数值
-#  错误码链接：https://www.xfyun.cn/document/error-code （code返回错误码时必看）
-# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 import os
 import sys
-from tracemalloc import start
+import warnings
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import _thread as thread
@@ -35,10 +26,23 @@ from urllib.parse import urlencode
 from wsgiref.handlers import format_date_time
 import sounddevice as sd
 import wave
+import requests
 
 STATUS_FIRST_FRAME = 0  # 第一帧的标识
 STATUS_CONTINUE_FRAME = 1  # 中间帧标识
 STATUS_LAST_FRAME = 2  # 最后一帧的标识
+
+
+def deprecated(func):
+    def wrapper(*args, **kwargs):
+        warnings.warn(
+            f"Function {func.__name__} using xunfei API is deprecated.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
 class MicPCMStream:
@@ -134,6 +138,7 @@ class MicPCMStream:
         return data
 
 
+@deprecated
 class Ws_Param(object):
     # 初始化
     def __init__(self, APPID, APIKey, APISecret, AudioBytes, MicStream=None):
@@ -196,6 +201,7 @@ class Ws_Param(object):
         return url
 
 
+@deprecated
 # 收到websocket消息的处理
 def on_message(ws, message):
     # print("### on_message ###")
@@ -222,18 +228,21 @@ def on_message(ws, message):
             ws.close()
 
 
+@deprecated
 # 收到websocket错误的处理
 def on_error(ws, error):
     # print("### error:", error)
     pass
 
 
+@deprecated
 # 收到websocket关闭的处理
 def on_close(ws, close_status_code, close_msg):
     # print("### closed :", close_status_code, close_msg)
     pass
 
 
+@deprecated
 def send(ws, wsParam: Ws_Param):
     frameSize = 1280  # 每一帧的音频大小
     intervel = 0.04  # 发送音频间隔(单位:s)
@@ -341,11 +350,13 @@ def mp3_bytes_to_pcm_16k_mono_s16le(mp3_bytes: bytes, format="mp3") -> bytes:
 
 
 def get_audio_text(
-    appid,
-    api_key,
-    api_secret,
+    backend: str = "",
 ):
-    """从麦克风获取一段音频并转写为文本"""
+    """从麦克风获取一段音频并转写为文本
+
+    参数:
+        backend: "whisper" 使用自部署 whisper 服务，其他值使用讯飞
+    """
     mic = MicPCMStream(sample_rate=16000, channels=1, block_frames=640)
     input("按回车键开始录音...\n")
     mic.start()
@@ -354,25 +365,53 @@ def get_audio_text(
     print("录音结束，正在识别...")
     start_time = time.time()
 
-    # 从麦克风队列读取全部音频数据
-    # 不是很稳定，改为直接读取保存的文件
-    # audio_chunks: list[bytes] = []
-    # while True:
-    #     try:
-    #         chunk = mic.q.get_nowait()
-    #     except queue.Empty:
-    #         break
-    #     audio_chunks.append(chunk)
-    # audio_bytes = b"".join(audio_chunks)
-
-    result = audio_file2text(mic._save_path)
+    result = audio_file2text(mic._save_path, backend=backend)
     print("识别耗时: %.2f 秒" % (time.time() - start_time))
     return result
-    # return result if result else "抓取最近的积木"
 
 
-def audio_file2text(audio_path: str) -> str:
-    """从音频文件获取转写文本"""
+def audio_file2text(audio_path: str, backend: str = "") -> str:
+    """从音频文件获取转写文本
+
+    参数:
+        audio_path: 音频文件路径
+        backend: 使用的后端，"xunfei" 使用讯飞，其他值使用自部署服务
+    """
+    if backend == "xunfei":
+        return _xfyun_transcribe(audio_path)
+    return _whisper_transcribe(audio_path)
+
+
+def _whisper_transcribe(audio_path: str) -> str:
+    """调用自部署的 whisper 服务转写音频"""
+    base_url = get_config_value("whisper_url")
+    username = get_config_value("whisper_username")
+    password = get_config_value("whisper_password")
+
+    session = requests.Session()
+    session.trust_env = False  # 不使用系统代理，避免局域网请求走代理
+    # 登录获取 session cookie
+    if username:
+        resp = session.post(
+            f"{base_url}/api/login",
+            json={"username": username, "password": password},
+        )
+        resp.raise_for_status()
+
+    # 上传音频文件进行转写
+    with open(audio_path, "rb") as f:
+        resp = session.post(
+            f"{base_url}/api/transcribe",
+            files={"file": (os.path.basename(audio_path), f)},
+            data={"language": "zh"},
+        )
+    resp.raise_for_status()
+    return resp.json().get("text", "")
+
+
+@deprecated
+def _xfyun_transcribe(audio_path: str) -> str:
+    """调用讯飞语音听写服务转写音频"""
     with open(audio_path, "rb") as f:
         audio_bytes = f.read()
     audio_bytes = mp3_bytes_to_pcm_16k_mono_s16le(
@@ -453,9 +492,6 @@ if __name__ == "__main__":
 
     print("=== 麦克风实时识别 ===")
 
-    result = get_audio_text(
-        appid=get_config_value("APPID"),
-        api_key=get_config_value("APIKey"),
-        api_secret=get_config_value("APISecret"),
-    )
+    backend = get_config_value("audio2text_backend", raise_if_missing=False)
+    result = get_audio_text(backend=backend)
     print("麦克风识别结果：", result)
