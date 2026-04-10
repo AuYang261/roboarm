@@ -107,9 +107,6 @@ def catch_by_audio():
             ):
                 audio_future = audio_executor.submit(
                     get_audio_text,
-                    appid=get_config_value("APPID"),
-                    api_key=get_config_value("APIKey"),
-                    api_secret=get_config_value("APISecret"),
                 )
                 box_queue.put(None)  # 清空当前目标框
         if not thread.is_alive():
