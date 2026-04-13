@@ -57,7 +57,7 @@
               <inertial pos="0.00544111 0.000115633 -0.0190522" quat="0.687452 -0.165558 -0.165558 0.687452" mass="0.230086" diaginertia="8.4e-05 7.82036e-05 3.37964e-05"/>
               <joint name="joint5" pos="0 0 0" axis="0 0 -1"/>
               <!-- 夹爪跟随相机：位于关节连接处，朝夹爪中心（-z）方向看 -->
-              <camera name="gripper_cam" pos="0 0.02 0" xyaxes="1 0 0 0 0 -1"/>
+              <camera name="gripper_cam" pos="0 0.08 0" xyaxes="1 0 0 0 0.8 -0.6"/>
               <geom pos="-0.001528 -0.105265 -0.122394" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="gripper_static_1"/>
               <geom pos="-0.001528 -0.105265 -0.122394" quat="1 0 0 0" type="mesh" mesh="gripper_static_1"/>
               <body name="gripper_moving_1" pos="-0.0074 -0.00025 -0.01315">
