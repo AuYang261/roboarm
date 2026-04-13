@@ -1,4 +1,13 @@
 # Description: 机械臂控制封装
+from arm.arm_base import ArmBase
+from scipy.optimize import minimize
+from scipy.spatial.transform import Rotation as R
+import numpy as np
+import kinpy
+from typing import Union, List
+from pathlib import Path
+from lerobot.robots.koch_follower import config_koch_follower, koch_follower
+from config_getter import get_config_value
 from collections.abc import Sequence
 from math import inf
 import sys
@@ -10,18 +19,9 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "lerobot/src/")
 )
-from config_getter import get_config_value
-from lerobot.robots.koch_follower import config_koch_follower, koch_follower
-from pathlib import Path
-from typing import Union, List
-import kinpy
-import numpy as np
-from scipy.spatial.transform import Rotation as R
-from scipy.optimize import minimize
-from arm.arm_base import ArmBase
 
 
-class Arm(ArmBase):
+class LeroboArm(ArmBase, arm_type="piper"):
     def __init__(
         self,
         calibration_dir=os.path.join(
@@ -47,7 +47,8 @@ class Arm(ArmBase):
             "default_gripper_close_threshold"
         )
         self.catch_time_interval_s = get_config_value("catch_time_interval_s")
-        self.get_arm_angles_retry_times = get_config_value("get_arm_angles_retry_times")
+        self.get_arm_angles_retry_times = get_config_value(
+            "get_arm_angles_retry_times")
         port = get_config_value("arm_port")
         self.steps = steps
         self.catch_times = 0
@@ -64,7 +65,8 @@ class Arm(ArmBase):
                 "运行arm/calibrate.py以获取arm_offset"
             )
         if os.path.exists(hand_eye_calibration_file):
-            self.hand_eye_calibration_matrix = np.load(hand_eye_calibration_file)
+            self.hand_eye_calibration_matrix = np.load(
+                hand_eye_calibration_file)
         with open(
             os.path.join(
                 os.path.dirname(__file__),
@@ -108,7 +110,8 @@ class Arm(ArmBase):
             if self.catch_times == 0:
                 acc = 0.0
             else:
-                acc = (self.catch_times - self.uncatch_times) / self.catch_times
+                acc = (self.catch_times - self.uncatch_times) / \
+                    self.catch_times
             f.write(f"Catch times: {self.catch_times}\n")
             f.write(f"Uncatch times: {self.uncatch_times}\n")
             f.write(f"Catch accuracy: {acc:.2%}\n")
@@ -126,7 +129,8 @@ class Arm(ArmBase):
         motor_names = list(self.arm.bus.motors.keys())
         action: dict[str, float] = {}
         if gripper_angle_deg is not None:
-            action[motor_names[-1] + ".pos"] = np.clip(gripper_angle_deg, 0, 100)
+            action[motor_names[-1] +
+                   ".pos"] = np.clip(gripper_angle_deg, 0, 100)
         if angles_deg is not None:
             for motor_name, angle_deg in zip(motor_names[:-1], angles_deg, strict=True):
                 if angle_deg is not None:
@@ -204,7 +208,8 @@ class Arm(ArmBase):
         """
         机械臂回到初始位置
         """
-        self.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=gripper_angle_deg)
+        self.set_arm_angles(
+            [0, 0, 0, 0, 0], gripper_angle_deg=gripper_angle_deg)
         return self.chain.forward_kinematics(np.deg2rad([0, 0, 0, 0, 0]).tolist())
 
     def move_to(
@@ -478,7 +483,8 @@ class Arm(ArmBase):
         ).magnitude()
 
         # 返回加权总误差
-        total_cost = (position_weight * pos_error) + (rotation_weight * rot_error)
+        total_cost = (position_weight * pos_error) + \
+            (rotation_weight * rot_error)
         return total_cost
 
 

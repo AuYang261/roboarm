@@ -1,17 +1,20 @@
-import numpy as np
+from config_getter import get_config_value
 import time
+import numpy as np
+from piper_sdk import C_PiperInterface_V2
+from arm.arm_base import ArmBase
 import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from piper_sdk import C_PiperInterface_V2
-from arm.arm_base import ArmBase
 from scipy.spatial.transform import Rotation as R
 
 
-class PiperBySDK(ArmBase):
+class PiperBySDK(ArmBase, arm_type="lerobo"):
     FACTOR = 1000.0
+    joint_num = 6
+    joint_lower_limits = [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944]
+    joint_upper_limits = [2.618, 3.14, 0.0, 1.745, 1.22, 2.0944]
 
     def __init__(self, move_mode_end_pose: bool = False, debug_mode=True):
         """
@@ -26,7 +29,7 @@ class PiperBySDK(ArmBase):
         # 统一是弧度
         self.joints_state_ctrl = np.zeros(self.joint_num, dtype=np.float32)
 
-        self.piper = C_PiperInterface_V2("can4")
+        self.piper = C_PiperInterface_V2(get_config_value("arm_port"))
         self.piper.ConnectPort()
         self.piper.JointConfig(clear_err=0xAE)
         if not self._enable_fun():
@@ -48,7 +51,7 @@ class PiperBySDK(ArmBase):
         # time.sleep(2)
         self.disable()
 
-    def reset(self, move_mode_end_pose: bool = None, timeout: int = 5):
+    def reset(self, move_mode_end_pose: bool | None = None, timeout: int = 5):
         if self.debug_mode:
             timeout *= 2
         self.piper.JointConfig(clear_err=0xAE)
@@ -61,7 +64,8 @@ class PiperBySDK(ArmBase):
             if status.arm_status.motion_status == 0x00:
                 break
             if time.time() - start > timeout:
-                raise TimeoutError("Failed to reset within the specified timeout.")
+                raise TimeoutError(
+                    "Failed to reset within the specified timeout.")
         self.set_gripper(close=False)
 
         if move_mode_end_pose is None:
@@ -165,7 +169,8 @@ class PiperBySDK(ArmBase):
         end_pose = self.piper.GetArmEndPoseMsgs().end_pose
         return (
             np.array(
-                [end_pose.RX_axis, end_pose.RY_axis, end_pose.RZ_axis], dtype=np.float32
+                [end_pose.RX_axis, end_pose.RY_axis,
+                    end_pose.RZ_axis], dtype=np.float32
             )
             / self.FACTOR
         )
@@ -216,7 +221,8 @@ class PiperBySDK(ArmBase):
         )
 
     def render(self):
-        raise RuntimeError("Rendering is not supported in Piper SDK control mode.")
+        raise RuntimeError(
+            "Rendering is not supported in Piper SDK control mode.")
 
     def _enable_fun(self) -> bool:
         """
@@ -318,7 +324,8 @@ if __name__ == "__main__":
     print("Initial joint positions:", piper_ctrl.get_joint())
     print("Initial gripper position:", piper_ctrl.get_gripper())
     print("Initial end-effector position:", piper_ctrl.get_ee_pos())
-    print("Initial end-effector orientation (quaternion):", piper_ctrl.get_ee_quat())
+    print("Initial end-effector orientation (quaternion):",
+          piper_ctrl.get_ee_quat())
     # piper_ctrl.set_joint(
     #     {i: [0.5, 0.5, -0.7, 0.3, -0.2, 0.5, 0.08][i] for i in range(6)}
     # )
@@ -346,7 +353,8 @@ if __name__ == "__main__":
     print(piper_ctrl.piper.GetArmStatus().arm_status)
     print("Updated end-effector position:", piper_ctrl.get_ee_pos())
     print("Updated end-effector orientation (euler):", piper_ctrl.get_ee_euler())
-    print("Updated end-effector orientation (quaternion):", piper_ctrl.get_ee_quat())
+    print("Updated end-effector orientation (quaternion):",
+          piper_ctrl.get_ee_quat())
 
     # 这两句不sleep好像到不了
     piper_ctrl.set_ee_pose(
