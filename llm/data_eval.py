@@ -31,6 +31,7 @@ import cv2
 import numpy as np
 import json
 import argparse
+from threading import Lock
 
 
 parser = argparse.ArgumentParser(description="Process image dataset")
@@ -82,11 +83,16 @@ class BoxPoints:
         return self.__str__()
 
 
+lock = Lock()
 def audio_file2text_wrapper(audio_path: Path) -> str:
     """将音频文件路径转换为文本指令，供LLMDetect使用"""
     # 这里直接调用audio_file2text函数，也可以根据需要添加更多逻辑
     if args.audio:
-        return audio_file2text(audio_path.as_posix())
+        res = audio_file2text(audio_path.as_posix())
+        lock.acquire()
+        print(res)
+        lock.release()
+        return res
     return audio_path.stem
 
 

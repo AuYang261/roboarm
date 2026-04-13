@@ -107,9 +107,6 @@ def catch_by_audio():
             ):
                 audio_future = audio_executor.submit(
                     get_audio_text,
-                    appid=get_config_value("APPID"),
-                    api_key=get_config_value("APIKey"),
-                    api_secret=get_config_value("APISecret"),
                 )
                 box_queue.put(None)  # 清空当前目标框
         if not thread.is_alive():
@@ -124,73 +121,80 @@ def catch_by_instruction(
     success_callback: Optional[Callable[[], None]] = None,
 ):
     """根据和画面指令阻塞获取检测结果，执行抓取动作，并将检测结果放入队列中"""
-    global arm, llm_detect
-    print("Instruction:", instruction)
-    class_pos = get_config_value("class_pos")
-    offset = get_config_value("catch_offset")
-    default_gripper_aside_pos = get_config_value("default_gripper_aside_pos")
-    arm.move_to(default_gripper_aside_pos, 80)
-    time.sleep(0.5)
-    print("LLM Detecting...")
-    start = time.time()
-    response_task = llm_detect.detect_frame(
-        frame,
-        prompt_key="user_instruction_prompt",
-        replace_map={"{user_instruction}": instruction},
-        schema=TypeAdapter(DetectedFromLLM).json_schema(),
-    )
-    if response_task and frame is not None:
-        while True:
-            response, done = llm_detect.llm_api.await_task(
-                response_task, blocking=False
-            )
-            if response:
-                print(f"Detect used {time.time()-start}s")
-                # print("LLM Response:", response)
-                box = json2box(response, img_w=frame.shape[1], img_h=frame.shape[0])
-                print("检测到的目标:", box)
-                if box:
-                    queue_output.put(box)
-                    # 将图像坐标转换为机械臂坐标系
-                    target_x, target_y = arm.pixel2pos(
-                        box.box_center_x,
-                        box.box_center_y,
-                    )
-                    gripper_angle_rad = arm.gripper_angle_by_longer(
-                        box.box_center_x,
-                        box.box_center_y,
-                        box.box_width,
-                        box.box_height,
-                        box.box_rotation_deg,
-                    )
-                    if "红" in box.class_name or "red" in box.class_name.lower():
-                        print("红色积木，放置到红色区域")
-                        place_pos = class_pos.get("red_block")
-                    elif "黄" in box.class_name or "yellow" in box.class_name.lower():
-                        print("黄色积木，放置到黄色区域")
-                        place_pos = class_pos.get("yellow_block")
-                    elif "蓝" in box.class_name or "blue" in box.class_name.lower():
-                        print("蓝色积木，放置到蓝色区域")
-                        place_pos = class_pos.get("blue_block")
-                    elif "绿" in box.class_name or "green" in box.class_name.lower():
-                        print("绿色积木，放置到绿色区域")
-                        place_pos = class_pos.get("green_block")
-                    else:
-                        print("未知积木，放置到默认区域")
-                        place_pos = class_pos.get("blue_block")
-                    catch_success = arm.catch_and_place(
-                        target_x + offset * np.cos(gripper_angle_rad),
-                        target_y + offset * np.sin(-gripper_angle_rad),
-                        gripper_angle_rad,
-                        place_pos,
-                    )
-                    record_catch_result(instruction, box.class_name, catch_success)
-                    if catch_success and success_callback:
-                        success_callback()
-            if done:
-                break
-    else:
-        print(f"No response({response_task}) or frame({frame}) available.")
+    try:
+        global arm, llm_detect
+        print("Instruction:", instruction)
+        class_pos = get_config_value("class_pos")
+        offset = get_config_value("catch_offset")
+        default_gripper_aside_pos = get_config_value("default_gripper_aside_pos")
+        arm.move_to(default_gripper_aside_pos, 80)
+        time.sleep(0.5)
+        print("LLM Detecting...")
+        start = time.time()
+        response_task = llm_detect.detect_frame(
+            frame,
+            prompt_key="user_instruction_prompt",
+            replace_map={"{user_instruction}": instruction},
+            schema=TypeAdapter(DetectedFromLLM).json_schema(),
+        )
+        if response_task and frame is not None:
+            while True:
+                response, done = llm_detect.llm_api.await_task(
+                    response_task, blocking=False
+                )
+                if response:
+                    print(f"Detect used {time.time()-start}s")
+                    # print("LLM Response:", response)
+                    box = json2box(response, img_w=frame.shape[1], img_h=frame.shape[0])
+                    print("检测到的目标:", box)
+                    if box:
+                        queue_output.put(box)
+                        # 将图像坐标转换为机械臂坐标系
+                        target_x, target_y = arm.pixel2pos(
+                            box.box_center_x,
+                            box.box_center_y,
+                        )
+                        gripper_angle_rad = arm.gripper_angle_by_longer(
+                            box.box_center_x,
+                            box.box_center_y,
+                            box.box_width,
+                            box.box_height,
+                            box.box_rotation_deg,
+                        )
+                        if "红" in box.class_name or "red" in box.class_name.lower():
+                            print("红色积木，放置到红色区域")
+                            place_pos = class_pos.get("red_block")
+                        elif (
+                            "黄" in box.class_name or "yellow" in box.class_name.lower()
+                        ):
+                            print("黄色积木，放置到黄色区域")
+                            place_pos = class_pos.get("yellow_block")
+                        elif "蓝" in box.class_name or "blue" in box.class_name.lower():
+                            print("蓝色积木，放置到蓝色区域")
+                            place_pos = class_pos.get("blue_block")
+                        elif (
+                            "绿" in box.class_name or "green" in box.class_name.lower()
+                        ):
+                            print("绿色积木，放置到绿色区域")
+                            place_pos = class_pos.get("green_block")
+                        else:
+                            print("未知积木，放置到默认区域")
+                            place_pos = class_pos.get("blue_block")
+                        catch_success = arm.catch_and_place(
+                            target_x + offset * np.cos(gripper_angle_rad),
+                            target_y + offset * np.sin(-gripper_angle_rad),
+                            gripper_angle_rad,
+                            place_pos,
+                        )
+                        record_catch_result(instruction, box.class_name, catch_success)
+                        if catch_success and success_callback:
+                            success_callback()
+                if done:
+                    break
+        else:
+            print(f"No response({response_task}) or frame({frame}) available.")
+    except Exception as e:
+        print("Exception: ", e)
 
 
 def catch_by_text_instruction():

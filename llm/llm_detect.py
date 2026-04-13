@@ -21,7 +21,7 @@ from typing import Any
 from llm.llm_api import LLMAPI, extract_json_from_markdown, inline_schema_refs, font
 from llm.dataclass import DetectedBox, DetectedFromLLM
 
-# 每次检测并行发送的请求数，结果取平均以提高准确率（理论上不增加响应时间，但实际好像会变慢）
+# 每次检测并行发送的请求数，结果取平均以提高准确率（不大时不增加响应时间）
 BATCH_SIZE = 1
 
 
