@@ -11,6 +11,7 @@ temp/
 comparison_results/
 sim/isaacSimKoch/
 IsaacLabs/
+tmp/
 
 *.txt
 .env

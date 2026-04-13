@@ -13,7 +13,7 @@ import numpy as np
 import concurrent.futures
 import time
 from queue import Queue
-from arm.arm_control import Arm
+from arm.lerobo_arm_control import Arm
 from threading import Thread
 from typing import Callable, Optional
 

@@ -4,12 +4,10 @@ import subprocess
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from config_getter import get_config_value
-from turtle import width
 from openai.types.chat.chat_completion import ChatCompletion
 from openai import OpenAI, AsyncOpenAI
 import base64
 import time
-import yaml
 import toml
 from PIL import Image, ImageDraw, ImageFont
 import cv2

@@ -2,9 +2,7 @@
 
 import cv2
 import threading
-import time
 import requests
-import numpy as np
 import argparse
 import json
 import signal

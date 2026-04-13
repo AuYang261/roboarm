@@ -5,7 +5,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.camera_api import Camera
-from arm.arm_control import Arm
+from arm.lerobo_arm_control import Arm
 import cv2
 import xlrd2, xlwt
 from math import cos, sin, pi

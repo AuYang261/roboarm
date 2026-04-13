@@ -10,7 +10,7 @@ import time
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from arm.arm_control import Arm
+from arm.lerobo_arm_control import Arm
 
 # 使用机械臂摄像头对机械臂进行精确定位校准操作
 

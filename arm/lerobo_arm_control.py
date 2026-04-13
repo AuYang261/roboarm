@@ -16,13 +16,12 @@ from pathlib import Path
 from typing import Union, List
 import kinpy
 import numpy as np
-import yaml
 from scipy.spatial.transform import Rotation as R
 from scipy.optimize import minimize
+from arm.arm_base import ArmBase
 
 
-class Arm:
-
+class Arm(ArmBase):
     def __init__(
         self,
         calibration_dir=os.path.join(

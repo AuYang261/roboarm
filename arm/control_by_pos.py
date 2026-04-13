@@ -3,7 +3,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from arm.arm_control import Arm
+from arm.lerobo_arm_control import Arm
 import numpy as np
 import time
 from pynput import keyboard
