@@ -51,34 +51,37 @@ def record_catch_result(instruction: str, target_name: str, success: bool):
 
 
 arm = Arm()
-llm_detect = LLMDetect()
+box_queue = Queue()
+frame = None
+
+
+def consumption_thread():
+    global frame, box_queue
+    box = None
+    while True:
+        if not box_queue.empty():
+            box = box_queue.get(block=False)
+        if frame is None:
+            continue
+        frame_draw = draw_boxes_on_frame(
+            boxes=[box] if box else [],
+            frame=frame,
+        )
+        cv2.imshow("LLM Detection", frame_draw)
+        if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
+            cv2.destroyAllWindows()
+            arm.disconnect_arm()
+            break
+
 
 def catch_by_audio():
+    global frame, box_queue
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     audio_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     future = None
     audio_future = None
-    box_queue = Queue()
-    frame = None
     text = None
     cam = Camera()
-
-    def consumption_thread():
-        nonlocal frame
-        box = None
-        while True:
-            if not box_queue.empty():
-                box = box_queue.get(block=False)
-            if frame is None:
-                continue
-            frame_draw = draw_boxes_on_frame(
-                boxes=[box] if box else [],
-                frame=frame,
-            )
-            cv2.imshow("LLM Detection", frame_draw)
-            if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
-                cv2.destroyAllWindows()
-                break
 
     thread = Thread(target=consumption_thread)
     thread.start()
@@ -112,6 +115,7 @@ def catch_by_audio():
         if not thread.is_alive():
             break
     cam.close()
+    exit(0)
 
 
 def catch_by_instruction(
@@ -122,7 +126,8 @@ def catch_by_instruction(
 ):
     """根据和画面指令阻塞获取检测结果，执行抓取动作，并将检测结果放入队列中"""
     try:
-        global arm, llm_detect
+        global arm
+        llm_detect = LLMDetect()
         print("Instruction:", instruction)
         class_pos = get_config_value("class_pos")
         offset = get_config_value("catch_offset")
@@ -198,6 +203,7 @@ def catch_by_instruction(
 
 
 def catch_by_text_instruction():
+    global frame, box_queue
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     instructions = [
         # "抓取蓝色积木",
@@ -213,26 +219,7 @@ def catch_by_text_instruction():
         "抓取最右边的积木",
     ]
     future = None
-    box_queue = Queue()
-    frame = None
     cam = Camera()
-
-    def consumption_thread():
-        nonlocal frame
-        box = None
-        while True:
-            if not box_queue.empty():
-                box = box_queue.get(block=False)
-            if frame is None:
-                continue
-            frame_draw = draw_boxes_on_frame(
-                boxes=[box] if box else [],
-                frame=frame,
-            )
-            cv2.imshow("LLM Detection", frame_draw)
-            if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
-                cv2.destroyAllWindows()
-                break
 
     thread = Thread(target=consumption_thread)
     thread.start()
@@ -260,8 +247,9 @@ def catch_by_text_instruction():
         if not thread.is_alive():
             break
     cam.close()
+    exit(0)
 
 
 if __name__ == "__main__":
-    catch_by_text_instruction()
-    # catch_by_audio()
+    # catch_by_text_instruction()
+    catch_by_audio()

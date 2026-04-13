@@ -24,5 +24,6 @@ config.yaml
 object_detect/data.yaml
 
 *.mp3
+*.mp4
 *.wav
 *.zip
