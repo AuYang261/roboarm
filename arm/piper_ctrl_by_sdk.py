@@ -29,6 +29,7 @@ class PiperBySDK(Arm):
         self.piper = C_PiperInterface_V2(get_config_value("arm_port"))
         self.piper.ConnectPort()
         self.piper.JointConfig(clear_err=0xAE)
+        # self.piper.JointConfig(set_zero=0xAE, clear_err=0xAE)
         if not self._enable_fun():
             print(self.piper.GetArmStatus())
             raise RuntimeError("Failed to enable Piper arm.")

@@ -1,12 +1,9 @@
-
 import cv2
 # from object_detect.detect import detect_objects_in_frame, draw_box, load_model
 import numpy as np
-import yaml
 from ultralytics import YOLO
 import cv2
 import numpy as np
-import time
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -218,4 +215,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    

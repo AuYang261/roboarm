@@ -14,9 +14,6 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.camera_api import Camera
 from config_getter import get_config_value
 from arm.arm_base import Arm
-import yaml
-
-
 import argparse
 import cv2
 import numpy as np

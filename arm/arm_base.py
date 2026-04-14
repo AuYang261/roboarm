@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 from config_getter import get_config_value
 from typing import Any
+import importlib
 
 
 class Arm:
@@ -17,8 +18,6 @@ class Arm:
 
     def __new__(cls, *args, **kwargs) -> Any:
         if cls is Arm:
-            import importlib
-
             arm_type = get_config_value("arm_type")
             entry = cls._ARM_TYPES.get(arm_type)
             if not entry:
@@ -29,7 +28,7 @@ class Arm:
             module_path, class_name = entry
             module = importlib.import_module(module_path)
             target_class = getattr(module, class_name)
-            return target_class(*args, **kwargs)
+            return super().__new__(target_class)
         return super().__new__(cls)
 
     def __init__(
