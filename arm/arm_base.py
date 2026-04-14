@@ -5,6 +5,7 @@ from math import inf
 import cv2
 import numpy as np
 from config_getter import get_config_value
+from typing import Any
 
 
 class Arm:
@@ -14,7 +15,7 @@ class Arm:
         "lerobo": ("arm.lerobo_arm_control", "LeroboArm"),
     }
 
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls, *args, **kwargs) -> Any:
         if cls is Arm:
             import importlib
 

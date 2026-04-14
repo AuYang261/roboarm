@@ -229,7 +229,7 @@ class LeroboArm(Arm):
 
 
 if __name__ == "__main__":
-    arm = Arm()
+    arm: LeroboArm = Arm()
     time.sleep(1)
     arm.move_to_home(gripper_open_0to1=1)
     time.sleep(1)

@@ -265,7 +265,7 @@ class PiperBySDK(Arm):
         if not 0 <= gripper_open_0to1 <= 1:
             raise ValueError("gripper_open_0to1 must in [0, 1]")
         self.piper.GripperCtrl(
-            int(gripper_open_0to1 * self.FACTOR),
+            int(gripper_open_0to1 * 100 * self.FACTOR),
             gripper_effort=1000,
             gripper_code=0x01,
             set_zero=0,
@@ -342,7 +342,7 @@ class PiperBySDK(Arm):
 
 
 if __name__ == "__main__":
-    arm = Arm(debug_mode=False)
+    arm: PiperBySDK = Arm(debug_mode=False)
     time.sleep(1)
     print("关节角度:", arm.get_arm_angles())
     print("末端位置:", arm.get_arm_pos())
