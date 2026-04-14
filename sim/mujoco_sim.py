@@ -94,7 +94,8 @@ class KeyboardController:
 
 class SimMujocoModel:
     """MuJoCo机械臂仿真器，封装了仿真循环、控制、视角和稳定模式"""
-
+    import mujoco
+    import mujoco.viewer
     # 初始化
     def __init__(self, urdf_path):
         self.model = mujoco.MjModel.from_xml_path(urdf_path)
@@ -134,7 +135,7 @@ class SimMujocoModel:
 
         # 视角字典 {name: {distance, lookat, elevation, azimuth, follow_body?}}
         self.views = {}
-        self.current_view = None  # 当��激活的视角名称
+        self.current_view = None  # 当前激活的视角名称
 
     # 设置移动速度
     def set_speed(self, speed):
@@ -281,7 +282,7 @@ def _apply_pd_control(sim):
 
 def main():
     """主函数，创建仿真模型并运行"""
-    model_path = 'urdf/meshes/mjmodel.xml'
+    model_path = 'urdf/meshes/mjmodel_opt.xml'
     sim = SimMujocoModel(model_path)
 
     # 注册视角
@@ -442,7 +443,6 @@ def prepo2rad_homing(prepo, calibration_file="calibration/koch_follower.json"):
     my_prepose = [actual[i] + MODEL_HOMING[i] for i in range(len(prepo))]
     print(f"func my_prepose: {my_prepose}")
     return prepo2rad_direct(my_prepose)
-    
 
 def prepo2rad_direct(action):
     """
@@ -606,29 +606,6 @@ def action2rad(action, calibration_file="calibration/koch_follower.json", use_de
     rad = prepo2rad_homing(prepo, calibration_file=calibration_file)
     return rad
 
-# action 2 rad
-# def action2rad_direct(action):
-#     """
-#     将action转换为弧度
-#     action: list of floats
-#         关节范围[-100, 100]
-#         夹爪范围[0, 100] # 100 是开
-#     rad: list of floats
-#         关节: [-π, π]
-#         夹爪: [0, -1.3962634]
-#     """
-#     import numpy as np
-#     import math
-#     action = np.array(action, dtype=np.float64)
-#     num_joints = len(action) - 1  # 最后一个是夹爪
-#     rad = np.zeros_like(action)
-#     # action 是归一化值
-#     # 关节: [-100, 100] -> [-π, π]
-#     rad[:num_joints] = action[:num_joints] / 100.0 * math.pi
-#     # 夹爪: [0, 100] -> [0, -1.3962634]  (即 [0°, -80°])
-#     rad[num_joints] = -action[num_joints] / 100.0 * 1.3962634
-#     return rad.tolist()
-
 def replay():
     """回放函数，加载之前保存的仿真数据并回放"""
     # jsonl_file = 'sim/VLA_action.jsonl'
@@ -760,60 +737,6 @@ def replay():
 
     kb.stop()
     sim.close()
-
-# present position to rad
-# def prepo2rad(action, calibration_file="calibration/koch_follower.json"):
-#     """
-#     将原始位置信号（present position）转换为弧度
-#     Parameters:
-#     -----------
-#     action: list of floats
-#         原始位置信号，对应各个关节和夹爪的原始值
-#     calibration_file: str
-#         校准文件路径
-#     Returns:
-#     --------
-#     list of floats
-#         弧度值，关节: [-π, π]，夹爪: [-1.3962634, 0]
-#     """
-#     import json
-#     import numpy as np
-#     import math
-#     import os
-#     # 加载校准数据
-#     if not os.path.exists(calibration_file):
-#         calibration_file = os.path.join(os.path.dirname(__file__), '..', calibration_file)
-#     with open(calibration_file, 'r') as f:
-#         calibration = json.load(f)
-#     # 关节顺序（根据校准文件）
-#     joint_names = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
-#     action = np.array(action, dtype=np.float64)
-#     rad = np.zeros_like(action)
-#     # 前5个是关节，最后一个是夹爪
-#     for i, joint_name in enumerate(joint_names):
-#         if joint_name in calibration:
-#             calib = calibration[joint_name]
-#             range_min = calib["range_min"]
-#             range_max = calib["range_max"]
-#             # 限制在有效范围内
-#             val = np.clip(action[i], range_min, range_max)
-#             if joint_name == "gripper":
-#                 # 夹爪: [range_min, range_max] -> [180°, 260°] -> [-80°, 0°] -> [-1.3962634, 0] rad
-#                 # 先映射到 [180, 260] 度
-#                 degrees = 180 + (val - range_min) / (range_max - range_min) * 80
-#                 # 转换为 [-80, 0] 度
-#                 degrees = degrees - 260
-#                 # 转为弧度
-#                 rad[i] = degrees * (math.pi / 180.0)
-#             else:
-#                 # 关节: [range_min, range_max] -> [0, 360] 度 -> [-180, 180] 度 -> [-π, π] rad
-#                 # 先映射到 [0, 360] 度
-#                 degrees = (val - range_min) / (range_max - range_min) * 360
-#                 # 转换为 [-180, 180] 度
-#                 degrees = (degrees + 180) % 360 - 180
-#                 # 转为弧度
-#                 rad[i] = degrees * (math.pi / 180.0)
-#     return rad.tolist()
 
 def show(pose_type, pose, use_degrees=False, calibration_file="calibration\\koch_follower.json", model_path='urdf/meshes/mjmodel.xml', duration=60):
     """

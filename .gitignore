@@ -11,6 +11,7 @@ temp/
 comparison_results/
 sim/isaacSimKoch/
 IsaacLabs/
+sim/camera_simple_opt_output/
 
 *.txt
 .env
@@ -23,6 +24,7 @@ cmd
 config.yaml
 object_detect/data.yaml
 
+*.jpg
 *.mp3
 *.mp4
 *.wav
