@@ -127,7 +127,7 @@ def calibrate_2d(
 
 def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
     arm = Arm()
-    arm.move_to_home(gripper_angle_deg=None)
+    arm.move_to_home()
     time.sleep(1)
 
     """测试单应性矩阵"""
@@ -149,7 +149,7 @@ def test_homography(chain: kinpy.chain.SerialChain, M, image_point):
     time.sleep(1)
 
     # 归0
-    arm.move_to_home(gripper_angle_deg=None)
+    arm.move_to_home()
     time.sleep(1)
     arm.disconnect_arm()
 
@@ -158,7 +158,7 @@ def test_moveto(chain: kinpy.chain.SerialChain, M, image_point):
 
     # global arm
     arm = Arm()
-    arm.move_to_home(gripper_angle_deg=None)
+    arm.move_to_home()
     time.sleep(1)
 
     x = image_point[0]
@@ -168,13 +168,13 @@ def test_moveto(chain: kinpy.chain.SerialChain, M, image_point):
     print(f"Clicked image point: ({x}, {y}), Mapped arm position: ({target_x}, {target_y})")
     arm.move_to(
         [target_x, target_y, 0.07],
-        gripper_angle_deg=80,
+        gripper_open_0to1=1,
         rot_rad=0,
     )
 
     # time.sleep(2)
     # # 归0
-    # arm.move_to_home(gripper_angle_deg=None)
+    # arm.move_to_home()
 
 def test_moveto_double_arm(chain: kinpy.chain.SerialChain, M, image_point):
     pass

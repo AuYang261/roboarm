@@ -89,7 +89,7 @@ class LeroboArm(Arm):
 
     def __del__(self):
         try:
-            self.move_to_home(gripper_angle_deg=80)
+            self.move_to_home(gripper_open_0to1=1)
             time.sleep(self.catch_time_interval_s)
         except Exception as e:
             print(f"LeroboArm 析构复位失败: {e}")
@@ -101,17 +101,12 @@ class LeroboArm(Arm):
     def set_arm_angles(
         self,
         angles_deg: Sequence[float | int] | None = None,
-        gripper_angle_deg: float | int | None = None,
+        gripper_open_0to1: float | None = None,
     ):
-        """
-        设置机械臂角度和夹爪张开角度
-        angles: 机械臂各关节角度列表，单位度，顺序从底座到末端执行器，None表示不改变当前角度
-        gripper_angle: 夹爪张开角度，范围0-100，越大越开，单位度，None表示不改变当前角度
-        """
         motor_names = list(self.arm.bus.motors.keys())
         action: dict[str, float] = {}
-        if gripper_angle_deg is not None:
-            action[motor_names[-1] + ".pos"] = np.clip(gripper_angle_deg, 0, 100)
+        if gripper_open_0to1 is not None:
+            action[motor_names[-1] + ".pos"] = np.clip(gripper_open_0to1 * 100, 0, 100)
         if angles_deg is not None:
             for motor_name, angle_deg in zip(motor_names[:-1], angles_deg, strict=True):
                 if angle_deg is not None:
@@ -178,22 +173,16 @@ class LeroboArm(Arm):
     def disable_torque(self):
         self.arm.bus.disable_torque()
 
-    def move_to_home(self, gripper_angle_deg: float | int | None = None):
-        self.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=gripper_angle_deg)
+    def move_to_home(self, gripper_open_0to1: float | None = None):
+        self.set_arm_angles([0, 0, 0, 0, 0], gripper_open_0to1=gripper_open_0to1)
         return self.chain.forward_kinematics(np.deg2rad([0, 0, 0, 0, 0]).tolist())
 
     def move_to(
         self,
         pos: List[float],
-        gripper_angle_deg: float | int | None = None,
+        gripper_open_0to1: float | None = None,
         rot_rad: float | int | None = None,
     ):
-        """
-        机械臂移动到指定位置，单位米
-        pos: [x, y, z]
-        gripper_angle_deg: 夹爪张开角度，范围0-100，越大越开，单位度，None表示不改变当前角度
-        rot_rad: 末端执行器绕z轴旋转角度，单位弧度，None表示不改变当前角度
-        """
         if not hasattr(self, "chain"):
             raise ValueError("没有机械臂模型，无法使用位置控制")
         if len(pos) != 3:
@@ -216,7 +205,7 @@ class LeroboArm(Arm):
             print("逆运动学不收敛，无法到达指定位置")
             return None
         angles_deg = np.rad2deg(angles_deg.x).tolist()
-        if not self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg):
+        if not self.set_arm_angles(angles_deg, gripper_open_0to1=gripper_open_0to1):
             return None
         return self.get_arm_angles()
 
@@ -242,12 +231,12 @@ class LeroboArm(Arm):
 if __name__ == "__main__":
     arm = Arm()
     time.sleep(1)
-    arm.move_to_home(gripper_angle_deg=80)
+    arm.move_to_home(gripper_open_0to1=1)
     time.sleep(1)
     angles, gripper = arm.get_arm_angles()
     print("机械臂角度:", angles)
     print("夹爪状态:", gripper)
-    arm.set_arm_angles(None, gripper_angle_deg=0)
+    arm.set_arm_angles(None, gripper_open_0to1=0)
     time.sleep(1)
     angles, gripper = arm.get_arm_angles()
     print("机械臂角度:", angles)

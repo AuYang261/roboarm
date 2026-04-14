@@ -30,7 +30,7 @@ def main():
     offset = get_config_value("catch_offset")
 
     arm = Arm()
-    arm.move_to_home(gripper_angle_deg=80)
+    arm.move_to_home(gripper_open_0to1=1)
     cam = Camera(color=True, depth=False)
     models = [load_model(model_path) for model_path in model_paths]
     detections = []
@@ -110,7 +110,7 @@ def main():
         except KeyboardInterrupt:
             print("Exiting...")
 
-    arm.move_to_home(gripper_angle_deg=80)
+    arm.move_to_home(gripper_open_0to1=1)
     time.sleep(1)
     arm.disconnect_arm()
     cam.close()

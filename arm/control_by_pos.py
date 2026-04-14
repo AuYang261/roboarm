@@ -9,7 +9,7 @@ import time
 from pynput import keyboard
 import threading
 
-POS: list[float] = [0, 0.1, 0.1, 0, 0]  # x, y, z, gripper_angle_deg
+POS: list[float] = [0, 0.1, 0.1, 0, 0]  # x, y, z, gripper_open_0to1
 
 
 def on_press(key):
@@ -37,7 +37,7 @@ def on_press(key):
             POS[4] = 0
             print("Current position:", POS)
         elif key.char == "q":
-            POS[4] = 80
+            POS[4] = 1
             print("Current position:", POS)
         elif key.char == "r":
             # 随机
@@ -70,7 +70,7 @@ def main():
     input_thread.daemon = True
     input_thread.start()
     arm = Arm()
-    arm.move_to_home(gripper_angle_deg=80)
+    arm.move_to_home(gripper_open_0to1=1)
     pos = arm.get_arm_pos()
     if pos:
         POS[:3] = pos
@@ -78,10 +78,10 @@ def main():
     while True:
         try:
             if len(POS) != 5:
-                arm.move_to_home(gripper_angle_deg=80)
+                arm.move_to_home(gripper_open_0to1=1)
                 arm.disconnect_arm()
                 return
-            arm.move_to(POS[:3], gripper_angle_deg=POS[4], rot_rad=POS[3])
+            arm.move_to(POS[:3], gripper_open_0to1=POS[4], rot_rad=POS[3])
         except Exception as e:
             print("Error:", e)
             time.sleep(0.5)

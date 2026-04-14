@@ -1,12 +1,12 @@
-from typing import Union, List
-from collections.abc import Sequence
-from arm.arm_base import Arm
 import sys
 import os
 
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from typing import Union, List
+from collections.abc import Sequence
+from arm.arm_base import Arm
 from config_getter import get_config_value
 import time
 import numpy as np
@@ -47,12 +47,10 @@ class PiperBySDK(Arm):
     def set_arm_angles(
         self,
         angles_deg: Sequence[float | int] | None = None,
-        gripper_angle_deg: float | int | None = None,
+        gripper_open_0to1: float | int | None = None,
     ) -> bool:
-        if gripper_angle_deg is not None:
-            self.set_gripper(
-                close=(gripper_angle_deg <= self.default_gripper_close_threshold)
-            )
+        if gripper_open_0to1 is not None:
+            self.set_gripper(gripper_open_0to1=gripper_open_0to1)
 
         if angles_deg is not None:
             if len(angles_deg) != self.joint_num:
@@ -120,7 +118,7 @@ class PiperBySDK(Arm):
         except Exception:
             return None
 
-    def move_to_home(self, gripper_angle_deg: float | int | None = None):
+    def move_to_home(self, gripper_open_0to1: float | None = None):
         was_end_pose = self.move_mode_end_pose
         if was_end_pose:
             self.set_move_mode(move_mode_end_pose=False)
@@ -137,10 +135,8 @@ class PiperBySDK(Arm):
                 print("move_to_home 超时")
                 break
 
-        if gripper_angle_deg is not None:
-            self.set_gripper(
-                close=(gripper_angle_deg <= self.default_gripper_close_threshold)
-            )
+        if gripper_open_0to1 is not None:
+            self.set_gripper(gripper_open_0to1=gripper_open_0to1)
 
         if was_end_pose:
             self.set_move_mode(move_mode_end_pose=True)
@@ -149,7 +145,7 @@ class PiperBySDK(Arm):
     def move_to(
         self,
         pos: list[float],
-        gripper_angle_deg: float | int | None = None,
+        gripper_open_0to1: float | None = None,
         rot_rad: float | int | None = None,
     ):
         if len(pos) != 3:
@@ -165,10 +161,8 @@ class PiperBySDK(Arm):
 
         self.set_ee_pose(position=pos, euler_angles=euler)
 
-        if gripper_angle_deg is not None:
-            self.set_gripper(
-                close=(gripper_angle_deg <= self.default_gripper_close_threshold)
-            )
+        if gripper_open_0to1 is not None:
+            self.set_gripper(gripper_open_0to1=gripper_open_0to1)
 
         return self.get_arm_angles()
 
@@ -197,7 +191,7 @@ class PiperBySDK(Arm):
                 break
             if time.time() - start > timeout:
                 raise TimeoutError("Failed to reset within the specified timeout.")
-        self.set_gripper(close=False)
+        self.set_gripper(gripper_open_0to1=1)
 
         if move_mode_end_pose is None:
             move_mode_end_pose = self.move_mode_end_pose
@@ -264,9 +258,14 @@ class PiperBySDK(Arm):
                 print("set_ee_pose 超时")
                 break
 
-    def set_gripper(self, close: bool = True):
+    def set_gripper(self, gripper_open_0to1: float):
+        """
+        夹爪开闭程度，越大越开，0~1
+        """
+        if not 0 <= gripper_open_0to1 <= 1:
+            raise ValueError("gripper_open_0to1 must in [0, 1]")
         self.piper.GripperCtrl(
-            0 if close else int(100 * self.FACTOR),
+            int(gripper_open_0to1 * self.FACTOR),
             gripper_effort=1000,
             gripper_code=0x01,
             set_zero=0,
@@ -343,18 +342,24 @@ class PiperBySDK(Arm):
 
 
 if __name__ == "__main__":
-    arm = Arm()
+    arm = Arm(debug_mode=False)
     time.sleep(1)
     print("关节角度:", arm.get_arm_angles())
     print("末端位置:", arm.get_arm_pos())
 
-    arm.move_to_home(gripper_angle_deg=80)
+    arm.move_to_home(gripper_open_0to1=1)
     time.sleep(1)
+    print("关节角度:", arm.get_arm_angles())
+    print("末端位置:", arm.get_arm_pos())
 
-    arm.move_to([0.3, 0.2, 0.2], gripper_angle_deg=80, rot_rad=0)
+    arm.move_to([0.3, 0.2, 0.2], gripper_open_0to1=1, rot_rad=0)
     time.sleep(1)
+    print("关节角度:", arm.get_arm_angles())
+    print("末端位置:", arm.get_arm_pos())
 
-    arm.move_to_home(gripper_angle_deg=80)
+    arm.move_to_home(gripper_open_0to1=1)
     time.sleep(1)
+    print("关节角度:", arm.get_arm_angles())
+    print("末端位置:", arm.get_arm_pos())
 
     arm.disconnect_arm()
