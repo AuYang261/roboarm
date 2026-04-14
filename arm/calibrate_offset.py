@@ -5,7 +5,7 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from arm.lerobo_arm_control import Arm
+from arm.arm_base import Arm
 
 
 def main():

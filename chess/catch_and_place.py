@@ -4,7 +4,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from config_getter import get_config_value
-from arm.lerobo_arm_control import Arm
+from arm.arm_base import Arm
 import numpy as np
 from object_detect.detect import (
     detect_objects_in_frame,

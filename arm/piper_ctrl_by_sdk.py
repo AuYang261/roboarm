@@ -1,33 +1,30 @@
+from typing import Union, List
+from collections.abc import Sequence
+from arm.arm_base import Arm
+import sys
+import os
+
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from config_getter import get_config_value
 import time
 import numpy as np
 from piper_sdk import C_PiperInterface_V2
-from arm.arm_base import ArmBase
-import sys
-import os
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scipy.spatial.transform import Rotation as R
 
 
-class PiperBySDK(ArmBase, arm_type="lerobo"):
+class PiperBySDK(Arm):
     FACTOR = 1000.0
     joint_num = 6
-    joint_lower_limits = [-2.618, 0.0, -2.967, -1.745, -1.22, -2.0944]
-    joint_upper_limits = [2.618, 3.14, 0.0, 1.745, 1.22, 2.0944]
+    # 默认末端朝下的欧拉角 [RX, RY, RZ]（度）
+    DEFAULT_EULER_DEG = [0.0, 170.0, 0.0]
 
     def __init__(self, move_mode_end_pose: bool = False, debug_mode=True):
-        """
-        move_mode: int
-        0: 末端位姿控制
-        1: 关节角度控制
-        """
         super().__init__()
         self.debug_mode = debug_mode
         self.move_mode_end_pose = move_mode_end_pose
-        self.actuator_ids = [i for i in range(self.joint_num)]
-        # 统一是弧度
-        self.joints_state_ctrl = np.zeros(self.joint_num, dtype=np.float32)
 
         self.piper = C_PiperInterface_V2(get_config_value("arm_port"))
         self.piper.ConnectPort()
@@ -36,20 +33,155 @@ class PiperBySDK(ArmBase, arm_type="lerobo"):
             print(self.piper.GetArmStatus())
             raise RuntimeError("Failed to enable Piper arm.")
         self.reset(self.move_mode_end_pose)
-        # print(self.piper.GetArmGripperMsgs())
-        # print(self.piper.GetAllMotorAngleLimitMaxSpd())
 
     def __del__(self):
-        """
-        确保在对象销毁时复原并禁用机械臂
-        """
         print("Resetting Piper arm to initial state.")
         try:
             self.reset(move_mode_end_pose=False)
         except TimeoutError as e:
             print(f"Error during reset: {e}")
-        # time.sleep(2)
         self.disable()
+
+    # ========== 高层接口实现 ==========
+
+    def set_arm_angles(
+        self,
+        angles_deg: Sequence[float | int] | None = None,
+        gripper_angle_deg: float | int | None = None,
+    ) -> bool:
+        if gripper_angle_deg is not None:
+            self.set_gripper(
+                close=(gripper_angle_deg <= self.default_gripper_close_threshold)
+            )
+
+        if angles_deg is not None:
+            if len(angles_deg) != self.joint_num:
+                print(
+                    f"关节角度数量错误，期望{self.joint_num}个，实际{len(angles_deg)}个"
+                )
+                return False
+            was_end_pose = self.move_mode_end_pose
+            if was_end_pose:
+                self.set_move_mode(move_mode_end_pose=False)
+                self.move_mode_end_pose = False
+
+            ctrl = np.array(angles_deg) * self.FACTOR
+            self.piper.JointCtrl(
+                joint_1=int(ctrl[0]),
+                joint_2=int(ctrl[1]),
+                joint_3=int(ctrl[2]),
+                joint_4=int(ctrl[3]),
+                joint_5=int(ctrl[4]),
+                joint_6=int(ctrl[5]),
+            )
+            timeout = 10 if self.debug_mode else 5
+            start = time.time()
+            while True:
+                status = self.piper.GetArmStatus()
+                if status.arm_status.motion_status == 0x00:
+                    break
+                if time.time() - start > timeout:
+                    print("set_arm_angles 超时")
+                    break
+
+            if was_end_pose:
+                self.set_move_mode(move_mode_end_pose=True)
+                self.move_mode_end_pose = True
+
+        return True
+
+    def get_arm_angles(
+        self, retry_times=None
+    ) -> tuple[Union[List[float], None], Union[float, None]]:
+        try:
+            joints = self.piper.GetArmJointMsgs()
+            angles_deg = [
+                joints.joint_state.joint_1 / self.FACTOR,
+                joints.joint_state.joint_2 / self.FACTOR,
+                joints.joint_state.joint_3 / self.FACTOR,
+                joints.joint_state.joint_4 / self.FACTOR,
+                joints.joint_state.joint_5 / self.FACTOR,
+                joints.joint_state.joint_6 / self.FACTOR,
+            ]
+            gripper_msgs = self.piper.GetArmGripperMsgs()
+            gripper_deg = gripper_msgs.gripper_state.grippers_angle / self.FACTOR
+            return angles_deg, gripper_deg
+        except Exception:
+            if retry_times is None:
+                retry_times = self.get_arm_angles_retry_times
+            if retry_times > 0:
+                time.sleep(self.catch_time_interval_s)
+                return self.get_arm_angles(retry_times - 1)
+            return None, None
+
+    def get_arm_pos(self) -> list[float] | None:
+        try:
+            return self.get_ee_pos().tolist()
+        except Exception:
+            return None
+
+    def move_to_home(self, gripper_angle_deg: float | int | None = None):
+        was_end_pose = self.move_mode_end_pose
+        if was_end_pose:
+            self.set_move_mode(move_mode_end_pose=False)
+            self.move_mode_end_pose = False
+
+        self.piper.JointCtrl(0, 0, 0, 0, 0, 0)
+        timeout = 10 if self.debug_mode else 5
+        start = time.time()
+        while True:
+            status = self.piper.GetArmStatus()
+            if status.arm_status.motion_status == 0x00:
+                break
+            if time.time() - start > timeout:
+                print("move_to_home 超时")
+                break
+
+        if gripper_angle_deg is not None:
+            self.set_gripper(
+                close=(gripper_angle_deg <= self.default_gripper_close_threshold)
+            )
+
+        if was_end_pose:
+            self.set_move_mode(move_mode_end_pose=True)
+            self.move_mode_end_pose = True
+
+    def move_to(
+        self,
+        pos: list[float],
+        gripper_angle_deg: float | int | None = None,
+        rot_rad: float | int | None = None,
+    ):
+        if len(pos) != 3:
+            raise ValueError("位置参数格式错误，应该是[x, y, z]")
+
+        if not self.move_mode_end_pose:
+            self.set_move_mode(move_mode_end_pose=True)
+            self.move_mode_end_pose = True
+
+        euler = list(self.DEFAULT_EULER_DEG)
+        if rot_rad is not None:
+            euler[2] = np.degrees(rot_rad)
+
+        self.set_ee_pose(position=pos, euler_angles=euler)
+
+        if gripper_angle_deg is not None:
+            self.set_gripper(
+                close=(gripper_angle_deg <= self.default_gripper_close_threshold)
+            )
+
+        return self.get_arm_angles()
+
+    def disconnect_arm(self):
+        self.disable()
+
+    def enable_torque(self):
+        self.piper.EnableArm(7)
+
+    def disable_torque(self):
+        self.piper.DisableArm()
+
+    # ========== 内部方法 ==========
 
     def reset(self, move_mode_end_pose: bool | None = None, timeout: int = 5):
         if self.debug_mode:
@@ -64,8 +196,7 @@ class PiperBySDK(ArmBase, arm_type="lerobo"):
             if status.arm_status.motion_status == 0x00:
                 break
             if time.time() - start > timeout:
-                raise TimeoutError(
-                    "Failed to reset within the specified timeout.")
+                raise TimeoutError("Failed to reset within the specified timeout.")
         self.set_gripper(close=False)
 
         if move_mode_end_pose is None:
@@ -73,77 +204,7 @@ class PiperBySDK(ArmBase, arm_type="lerobo"):
         else:
             self.move_mode_end_pose = move_mode_end_pose
         if move_mode_end_pose:
-            # self.set_ee_pose(
-            #     position=[0.3, 0.2, 0.2],
-            #     euler_angles=[0.0, 170.0, 0.0],
-            # )
             self.set_move_mode(move_mode_end_pose=True, timeout=timeout)
-
-    def send_a_step(self):
-        if self.move_mode_end_pose:
-            raise RuntimeError(
-                "Cannot send a step in end-effector pose control mode. Please switch to joint control mode by reset(False)."
-            )
-        ctrl = np.degrees(self.joints_state_ctrl) * self.FACTOR
-        self.piper.JointCtrl(
-            joint_1=int(ctrl[0]),
-            joint_2=int(ctrl[1]),
-            joint_3=int(ctrl[2]),
-            joint_4=int(ctrl[3]),
-            joint_5=int(ctrl[4]),
-            joint_6=int(ctrl[5]),
-        )
-
-    def set_joint(self, joint_id2positions: dict[str, float]) -> dict[str, float]:
-        excess = {}
-        for idx, (joint_id, position) in enumerate(joint_id2positions.items()):
-            if joint_id in self.actuator_ids:
-                self.joints_state_ctrl[joint_id] = np.clip(
-                    position,
-                    self.joint_lower_limits[idx],
-                    self.joint_upper_limits[idx],
-                )
-                excess[joint_id] = self.joints_state_ctrl[joint_id] - position
-            else:
-                raise ValueError(f"Invalid joint ID: {joint_id}")
-        return excess
-
-    def add_joint(self, joint_id2action: dict[str, float]) -> dict[str, float]:
-        excess = {}
-        self.joints_state_ctrl = self.get_joint()
-        for idx, (joint_id, action) in enumerate(joint_id2action.items()):
-            if joint_id in self.actuator_ids:
-                new_qpos = self.joints_state_ctrl[joint_id] + action
-                self.joints_state_ctrl[joint_id] = np.clip(
-                    new_qpos,
-                    self.joint_lower_limits[idx],
-                    self.joint_upper_limits[idx],
-                )
-                excess[joint_id] = self.joints_state_ctrl[joint_id] - new_qpos
-            else:
-                raise ValueError(f"Invalid joint ID: {joint_id}")
-        return excess
-
-    def get_joint(self) -> np.ndarray:
-        joints = self.piper.GetArmJointMsgs()
-        return np.radians(
-            np.array(
-                [
-                    joints.joint_state.joint_1,
-                    joints.joint_state.joint_2,
-                    joints.joint_state.joint_3,
-                    joints.joint_state.joint_4,
-                    joints.joint_state.joint_5,
-                    joints.joint_state.joint_6,
-                ],
-                dtype=np.float32,
-            )
-            / self.FACTOR
-        )
-
-    def get_gripper(self) -> float:
-        gripper_msgs = self.piper.GetArmGripperMsgs()
-        return gripper_msgs.gripper_state.grippers_angle / self.FACTOR / 1000.0
 
     def get_ee_pos(self) -> np.ndarray:
         end_pose = self.piper.GetArmEndPoseMsgs().end_pose
@@ -156,6 +217,16 @@ class PiperBySDK(ArmBase, arm_type="lerobo"):
             / 1000.0
         )
 
+    def get_ee_euler(self) -> np.ndarray:
+        end_pose = self.piper.GetArmEndPoseMsgs().end_pose
+        return (
+            np.array(
+                [end_pose.RX_axis, end_pose.RY_axis, end_pose.RZ_axis],
+                dtype=np.float32,
+            )
+            / self.FACTOR
+        )
+
     def get_ee_quat(self) -> np.ndarray:
         end_pose = self.piper.GetArmEndPoseMsgs().end_pose
         return R.from_euler(
@@ -165,37 +236,20 @@ class PiperBySDK(ArmBase, arm_type="lerobo"):
             degrees=True,
         ).as_quat()
 
-    def get_ee_euler(self) -> np.ndarray:
-        end_pose = self.piper.GetArmEndPoseMsgs().end_pose
-        return (
-            np.array(
-                [end_pose.RX_axis, end_pose.RY_axis,
-                    end_pose.RZ_axis], dtype=np.float32
-            )
-            / self.FACTOR
-        )
-
     def set_ee_pose(
         self, position: list[float], euler_angles: list[float], timeout: int = 5
     ):
-        """
-        设置末端执行器位置和姿态
-        :param position: 末端执行器位置 [x, y, z] 单位为米
-        :param euler_angles: 欧拉角 [roll, pitch, yaw] 单位为度
-        """
         if self.move_mode_end_pose is False:
-            raise RuntimeError(
-                "Cannot set end-effector pose in joint control mode. Please switch to end pose control mode by reset(True)."
-            )
-        position = np.array(position) * self.FACTOR * 1000.0
-        euler_angles = np.array(euler_angles) * self.FACTOR
+            raise RuntimeError("Cannot set end-effector pose in joint control mode.")
+        position_scaled = np.array(position) * self.FACTOR * 1000.0
+        euler_scaled = np.array(euler_angles) * self.FACTOR
         self.piper.EndPoseCtrl(
-            X=int(position[0]),
-            Y=int(position[1]),
-            Z=int(position[2]),
-            RX=int(euler_angles[0]),
-            RY=int(euler_angles[1]),
-            RZ=int(euler_angles[2]),
+            X=int(position_scaled[0]),
+            Y=int(position_scaled[1]),
+            Z=int(position_scaled[2]),
+            RX=int(euler_scaled[0]),
+            RY=int(euler_scaled[1]),
+            RZ=int(euler_scaled[2]),
         )
 
         start = time.time()
@@ -205,14 +259,12 @@ class PiperBySDK(ArmBase, arm_type="lerobo"):
                 print(self.arm_status2str(status.arm_status))
                 break
             if status.motion_status == 0x00:
-                print("End-effector pose set successfully.")
                 break
             if time.time() - start > timeout:
-                print("Failed to set end-effector pose within the specified timeout.")
+                print("set_ee_pose 超时")
                 break
 
     def set_gripper(self, close: bool = True):
-        # 50 mm
         self.piper.GripperCtrl(
             0 if close else int(100 * self.FACTOR),
             gripper_effort=1000,
@@ -220,22 +272,10 @@ class PiperBySDK(ArmBase, arm_type="lerobo"):
             set_zero=0,
         )
 
-    def render(self):
-        raise RuntimeError(
-            "Rendering is not supported in Piper SDK control mode.")
-
     def _enable_fun(self) -> bool:
-        """
-        使能机械臂并检测使能状态,尝试5s,如果使能超时则返回False
-        """
-        enable_flag = False
-        # 设置超时时间（秒）
         timeout = 5
-        # 记录进入循环前的时间
         start_time = time.time()
-        elapsed_time_flag = False
-        while not (enable_flag):
-            elapsed_time = time.time() - start_time
+        while True:
             print("--------------------")
             self.piper.EnableArm(7)
             msgs = self.piper.GetArmLowSpdInfoMsgs()
@@ -249,33 +289,21 @@ class PiperBySDK(ArmBase, arm_type="lerobo"):
             )
             print("使能状态:", enable_flag)
             print("--------------------")
-            # 检查是否超过超时时间
-            if elapsed_time > timeout:
-                print("超时....")
-                elapsed_time_flag = True
-                # enable_flag = True
-                break
+            if enable_flag:
+                return True
+            if time.time() - start_time > timeout:
+                print("程序自动使能超时")
+                return False
             time.sleep(1)
-        if elapsed_time_flag:
-            print("程序自动使能超时")
-        return enable_flag
 
     def disable(self):
-        """
-        禁用机械臂
-        """
         self.piper.DisableArm()
         self.piper.GripperCtrl(0, 1000, 0x02, 0)
         self.piper.DisconnectPort()
         print("Piper arm disabled.")
 
     def set_move_mode(self, move_mode_end_pose: bool, timeout: int = 5):
-        """
-        切换到末端执行器位姿控制模式
-        :param timeout: 超时时间（秒）
-        """
         start = time.time()
-        # TODO: 看看mit模式是什么，据说响应速度更快
         self.piper.MotionCtrl_2(
             ctrl_mode=0x01,
             move_mode=0x0 if move_mode_end_pose else 0x01,
@@ -285,10 +313,6 @@ class PiperBySDK(ArmBase, arm_type="lerobo"):
         while True:
             status = self.piper.GetArmStatus()
             if status.arm_status.mode_feed == (0x00 if move_mode_end_pose else 0x01):
-                print(
-                    "Switched move mode to "
-                    + ("end pose control." if move_mode_end_pose else "joint control.")
-                )
                 break
             if time.time() - start > timeout:
                 raise TimeoutError(
@@ -319,51 +343,18 @@ class PiperBySDK(ArmBase, arm_type="lerobo"):
 
 
 if __name__ == "__main__":
-    piper_ctrl = PiperBySDK()
+    arm = Arm()
     time.sleep(1)
-    print("Initial joint positions:", piper_ctrl.get_joint())
-    print("Initial gripper position:", piper_ctrl.get_gripper())
-    print("Initial end-effector position:", piper_ctrl.get_ee_pos())
-    print("Initial end-effector orientation (quaternion):",
-          piper_ctrl.get_ee_quat())
-    # piper_ctrl.set_joint(
-    #     {i: [0.5, 0.5, -0.7, 0.3, -0.2, 0.5, 0.08][i] for i in range(6)}
-    # )
-    # piper_ctrl.send_a_step()
-    # print("Updated joint positions:", piper_ctrl.get_joint())
-    # print("Updated gripper position:", piper_ctrl.get_gripper())
-    # print("Updated end-effector position:", piper_ctrl.get_ee_pos())
-    # print("Updated end-effector orientation (quaternion):", piper_ctrl.get_ee_quat())
-    # piper_ctrl.set_gripper(close=True)
-    # print("Gripper closed.")
-    # time.sleep(1)
-    # piper_ctrl.set_gripper(close=False)
-    # print("Gripper opened.")
-    # piper_ctrl.set_joint({i: [0.0, 0.0, -0.0, 0.0, 0.2, 0.0, 0.0][i] for i in range(6)})
-    # piper_ctrl.send_a_step()
-    # time.sleep(1)
+    print("关节角度:", arm.get_arm_angles())
+    print("末端位置:", arm.get_arm_pos())
 
-    piper_ctrl.reset(move_mode_end_pose=True)
-    piper_ctrl.set_ee_pose(
-        position=[0.3, 0.2, 0.2],
-        euler_angles=[0.0, 90.0, 0.0],
-    )
-    print("Set end-effector pose.")
+    arm.move_to_home(gripper_angle_deg=80)
     time.sleep(1)
-    print(piper_ctrl.piper.GetArmStatus().arm_status)
-    print("Updated end-effector position:", piper_ctrl.get_ee_pos())
-    print("Updated end-effector orientation (euler):", piper_ctrl.get_ee_euler())
-    print("Updated end-effector orientation (quaternion):",
-          piper_ctrl.get_ee_quat())
 
-    # 这两句不sleep好像到不了
-    piper_ctrl.set_ee_pose(
-        position=[0.3, 0.2, 0.2],
-        euler_angles=[0.0, 170.0, 60.0],
-    )
-    piper_ctrl.set_ee_pose(
-        position=[0.3, 0.2, 0.3],
-        euler_angles=[0.0, 120.0, 60.0],
-    )
+    arm.move_to([0.3, 0.2, 0.2], gripper_angle_deg=80, rot_rad=0)
+    time.sleep(1)
 
-    del piper_ctrl  # 确保在测试结束时销毁对象
+    arm.move_to_home(gripper_angle_deg=80)
+    time.sleep(1)
+
+    arm.disconnect_arm()

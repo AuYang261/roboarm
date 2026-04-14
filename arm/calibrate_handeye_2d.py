@@ -13,7 +13,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.camera_api import Camera
 from config_getter import get_config_value
-from arm.lerobo_arm_control import Arm
+from arm.arm_base import Arm
 import yaml
 
 

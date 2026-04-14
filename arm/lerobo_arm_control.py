@@ -1,19 +1,7 @@
 # Description: 机械臂控制封装
-from arm.arm_base import ArmBase
-from scipy.optimize import minimize
-from scipy.spatial.transform import Rotation as R
-import numpy as np
-import kinpy
-from typing import Union, List
-from pathlib import Path
-from lerobot.robots.koch_follower import config_koch_follower, koch_follower
-from config_getter import get_config_value
-from collections.abc import Sequence
-from math import inf
 import sys
 import os
-import time
-import cv2
+
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(
@@ -21,7 +9,20 @@ sys.path.append(
 )
 
 
-class LeroboArm(ArmBase, arm_type="piper"):
+import time
+from arm.arm_base import Arm
+from scipy.optimize import minimize
+from scipy.spatial.transform import Rotation as R
+import numpy as np
+import kinpy
+from typing import Union, List
+from pathlib import Path
+from config_getter import get_config_value
+from collections.abc import Sequence
+from lerobot.robots.koch_follower import config_koch_follower, koch_follower
+
+
+class LeroboArm(Arm):
     def __init__(
         self,
         calibration_dir=os.path.join(
@@ -40,33 +41,16 @@ class LeroboArm(ArmBase, arm_type="piper"):
         hand_eye_calibration_file: 手眼标定文件路径，默认"hand-eye-data/2d_homography.npy"
         steps: 机械臂插值移动步数，步数越多越平滑但越慢
         """
-        self.desktop_height = get_config_value("default_desktop_height")
-        self.catch_raise_height = get_config_value("catch_raise_height", 0.1)
-        self.place_raise_height = get_config_value("place_raise_height", 0.1)
-        self.default_gripper_close_threshold = get_config_value(
-            "default_gripper_close_threshold"
-        )
-        self.catch_time_interval_s = get_config_value("catch_time_interval_s")
-        self.get_arm_angles_retry_times = get_config_value(
-            "get_arm_angles_retry_times")
+        super().__init__(hand_eye_calibration_file=hand_eye_calibration_file)
         port = get_config_value("arm_port")
         self.steps = steps
-        self.catch_times = 0
-        self.uncatch_times = 0
-        # 逆运动学优化目标权重
         self.position_weight, self.rotation_weight = 10, 1
-        # 这个offset是用来修正机械臂零位的，目前不知道为什么舵机全零位置不是机械臂的零位
-        # 所以每次重新标定或在新机械臂上需要重新测量这个offset
-        # 方法见 arm/calibrate.py
         self.offset = get_config_value("arm_offset")
         if len(self.offset) != 5:
             raise ValueError(
                 "配置文件中没有正确设置机械臂offset arm_offset, 应该是5个关节的角度列表"
                 "运行arm/calibrate.py以获取arm_offset"
             )
-        if os.path.exists(hand_eye_calibration_file):
-            self.hand_eye_calibration_matrix = np.load(
-                hand_eye_calibration_file)
         with open(
             os.path.join(
                 os.path.dirname(__file__),
@@ -104,17 +88,15 @@ class LeroboArm(ArmBase, arm_type="piper"):
             ) from e
 
     def __del__(self):
-        # 保存 抓取 ACC 信息到 txt 文件中
-        # 创建文件
-        with open("arm_catch_acc.txt", "w") as f:
-            if self.catch_times == 0:
-                acc = 0.0
-            else:
-                acc = (self.catch_times - self.uncatch_times) / \
-                    self.catch_times
-            f.write(f"Catch times: {self.catch_times}\n")
-            f.write(f"Uncatch times: {self.uncatch_times}\n")
-            f.write(f"Catch accuracy: {acc:.2%}\n")
+        try:
+            self.move_to_home(gripper_angle_deg=80)
+            time.sleep(self.catch_time_interval_s)
+        except Exception as e:
+            print(f"LeroboArm 析构复位失败: {e}")
+        try:
+            self.disconnect_arm()
+        except Exception as e:
+            print(f"LeroboArm 断开连接失败: {e}")
 
     def set_arm_angles(
         self,
@@ -129,8 +111,7 @@ class LeroboArm(ArmBase, arm_type="piper"):
         motor_names = list(self.arm.bus.motors.keys())
         action: dict[str, float] = {}
         if gripper_angle_deg is not None:
-            action[motor_names[-1] +
-                   ".pos"] = np.clip(gripper_angle_deg, 0, 100)
+            action[motor_names[-1] + ".pos"] = np.clip(gripper_angle_deg, 0, 100)
         if angles_deg is not None:
             for motor_name, angle_deg in zip(motor_names[:-1], angles_deg, strict=True):
                 if angle_deg is not None:
@@ -140,7 +121,6 @@ class LeroboArm(ArmBase, arm_type="piper"):
             if current_angles_deg is None or current_gripper_deg is None:
                 return False
             current_angles_deg.append(current_gripper_deg)
-            # 对角度插值
             for alpha in np.linspace(0, 1, self.steps + 1)[1:]:
                 interp_action = {}
                 for key, value in action.items():
@@ -168,7 +148,7 @@ class LeroboArm(ArmBase, arm_type="piper"):
         """
         try:
             angles_deg = list(self.arm.get_observation().values())
-        except Exception as e:
+        except Exception:
             if retry_times is None:
                 retry_times = self.get_arm_angles_retry_times
             if retry_times > 0:
@@ -181,35 +161,25 @@ class LeroboArm(ArmBase, arm_type="piper"):
         ], angles_deg[-1]
 
     def get_arm_pos(self) -> list[float] | None:
-        # 获取机械臂末端执行器位置，单位米
         angles_deg, _ = self.get_arm_angles()
         if angles_deg is None:
             return None
-        # 正运动学解析
         fk: kinpy.Transform = self.chain.forward_kinematics(
             np.deg2rad(angles_deg).tolist()
         )  # type: ignore
-        pos = fk.pos.tolist()
-        return pos
+        return fk.pos.tolist()
 
     def disconnect_arm(self):
         self.arm.disconnect()
 
     def enable_torque(self):
-        """
-        连接后默认是enabled力矩的
-        """
         self.arm.bus.enable_torque()
 
     def disable_torque(self):
         self.arm.bus.disable_torque()
 
     def move_to_home(self, gripper_angle_deg: float | int | None = None):
-        """
-        机械臂回到初始位置
-        """
-        self.set_arm_angles(
-            [0, 0, 0, 0, 0], gripper_angle_deg=gripper_angle_deg)
+        self.set_arm_angles([0, 0, 0, 0, 0], gripper_angle_deg=gripper_angle_deg)
         return self.chain.forward_kinematics(np.deg2rad([0, 0, 0, 0, 0]).tolist())
 
     def move_to(
@@ -228,264 +198,45 @@ class LeroboArm(ArmBase, arm_type="piper"):
             raise ValueError("没有机械臂模型，无法使用位置控制")
         if len(pos) != 3:
             raise ValueError("位置参数格式错误，应该是[x, y, z]")
-        # 控制夹爪角度的舵机逆时针为正，而欧拉角定义为绕z轴顺时针为正，所以这里取负号
         goal_tf = kinpy.Transform(
             pos=np.array(pos), rot=[0, 0, -rot_rad if rot_rad else 0]
         )
-        # 使用优化方法求解逆运动学
         angles_deg = minimize(
             self._ik_cost_function,
-            x0=np.zeros(len(self.chain.get_joint_parameter_names())),  # 初始猜测
+            x0=np.zeros(len(self.chain.get_joint_parameter_names())),
             args=(
                 goal_tf.matrix(),
                 self.chain,
                 self.position_weight,
                 self.rotation_weight,
             ),
-            method="SLSQP",  # 一种支持约束的优化算法
+            method="SLSQP",
         )
         if not angles_deg.success:
             print("逆运动学不收敛，无法到达指定位置")
             return None
-        else:
-            angles_deg = np.rad2deg(angles_deg.x).tolist()
+        angles_deg = np.rad2deg(angles_deg.x).tolist()
         if not self.set_arm_angles(angles_deg, gripper_angle_deg=gripper_angle_deg):
             return None
         return self.get_arm_angles()
-
-    def pixel2pos(self, u: float, v: float) -> tuple[float, float]:
-        """
-        将图像坐标转换为机械臂坐标系位置
-        u, v: 图像坐标，单位像素
-        返回值: x, y，单位米
-        """
-        if not hasattr(self, "hand_eye_calibration_matrix"):
-            raise ValueError("没有手眼标定数据，无法转换图像坐标")
-        pixel_coords = np.array([[u], [v], [1]])
-        world_coords = self.hand_eye_calibration_matrix @ pixel_coords
-        world_coords /= world_coords[2]
-        target_x, target_y = world_coords[0, 0], world_coords[1, 0]
-        return target_x, target_y
-
-    @staticmethod
-    def gripper_angle_by_longer(
-        u: float, v: float, w: float, h: float, angle_deg: float
-    ) -> float:
-        """
-        根据检测到的物体边界框，计算想沿较长边的方向抓取，夹爪应当采取的角度
-        u, v: 物体边界框中心点坐标，单位像素
-        w, h: 物体边界框宽高，单位像素
-        angle_deg: 物体边界框旋转角度，单位度
-        返回值: 夹爪角度，单位弧度
-        """
-        box_points = cv2.boxPoints(((u, v), (w, h), angle_deg))
-        # 计算较长边的两顶点
-        if np.linalg.norm(box_points[0] - box_points[1]) > np.linalg.norm(
-            box_points[1] - box_points[2]
-        ):
-            box_points = (
-                [box_points[0], box_points[1]]
-                if box_points[0][0] < box_points[1][0]
-                else [box_points[1], box_points[0]]
-            )
-        else:
-            box_points = (
-                [box_points[1], box_points[2]]
-                if box_points[1][0] < box_points[2][0]
-                else [box_points[2], box_points[1]]
-            )
-        # gripper_angle_rad 沿着物体长边方向，在[-pi/2, pi/2]范围内
-        gripper_angle_rad = np.pi / 2 + np.arctan2(
-            box_points[1][1] - box_points[0][1],
-            box_points[1][0] - box_points[0][0],
-        )
-        if gripper_angle_rad > np.pi / 2:
-            gripper_angle_rad -= np.pi
-        return gripper_angle_rad
-
-    def catch(
-        self,
-        target_x: float,
-        target_y: float,
-        rad: float,
-        height: float = inf,
-    ):
-        """
-        机械臂抓取物体并放到指定位置
-        target_x, target_y: 目标物体位置，单位米
-        rad: 物体旋转角度，单位弧度
-        height: 目标物体高度，单位米，默认桌面高度
-        """
-        self.catch_times += 1
-        if height == inf:
-            height = self.desktop_height
-
-        # 移动机械臂到目标位置上方
-        res = self.move_to(
-            [target_x, target_y, height + self.catch_raise_height],
-            gripper_angle_deg=80,
-            rot_rad=rad,
-        )
-        if res is None:
-            print("移动到目标位置失败，取消抓取")
-            self.move_to_home(gripper_angle_deg=80)
-            return False
-        time.sleep(self.catch_time_interval_s)
-
-        # 下降到目标位置
-        res = self.move_to(
-            [target_x, target_y, height],
-            gripper_angle_deg=80,
-            rot_rad=rad,
-        )
-        if res is None:
-            print("移动到目标位置失败，取消抓取")
-            self.move_to_home(gripper_angle_deg=80)
-            return False
-        time.sleep(self.catch_time_interval_s)
-
-        # 夹紧物体
-        self.set_arm_angles(gripper_angle_deg=0)
-        time.sleep(self.catch_time_interval_s)
-
-        # 抬起物体
-        res = self.move_to(
-            [target_x, target_y, height + self.catch_raise_height],
-            gripper_angle_deg=0,
-            rot_rad=rad,
-        )
-        if res is None:
-            print("移动到目标位置失败，取消抓取")
-            self.move_to_home(gripper_angle_deg=80)
-            return False
-        time.sleep(self.catch_time_interval_s)
-
-        # 确认夹紧成功
-        angles, gripper = self.get_arm_angles()
-        if gripper is None or gripper < self.default_gripper_close_threshold:
-            print("夹取失败")
-            self.uncatch_times += 1
-            self.move_to_home(gripper_angle_deg=80)
-            return False
-        time.sleep(self.catch_time_interval_s)
-        return True
-
-    def place(
-        self,
-        target_x: float,
-        target_y: float,
-        target_z: float,
-        rad: float = 0,
-    ):
-        """
-        机械臂放置物体到指定位置
-        target_x, target_y, target_z: 目标位置，单位米
-        rad: 物体旋转角度，单位弧度
-        """
-
-        # 移动机械臂到目标位置上方
-        res = self.move_to(
-            [target_x, target_y, target_z + self.place_raise_height],
-            gripper_angle_deg=0,
-            rot_rad=rad,
-        )
-        if res is None:
-            print("移动到目标位置失败，取消放置")
-            self.move_to_home(gripper_angle_deg=80)
-            return False
-        time.sleep(self.catch_time_interval_s)
-
-        # 改为不下降放置，直接在上方放开
-        # 下降到目标位置
-        # res = self.move_to(
-        #     [target_x, target_y, target_z],
-        #     gripper_angle_deg=0,
-        #     rot_rad=rad,
-        # )
-        # if res is None:
-        #     print("移动到目标位置失败，取消放置")
-        #     self.move_to_home(gripper_angle_deg=80)
-        #     return False
-        # time.sleep(self.catch_time_interval_s)
-
-        # 放开物体
-        self.set_arm_angles(gripper_angle_deg=80)
-        time.sleep(self.catch_time_interval_s)
-
-        # 抬起机械臂
-        # res = self.move_to(
-        #     [target_x, target_y, target_z + self.place_raise_height],
-        #     gripper_angle_deg=80,
-        #     rot_rad=rad,
-        #     warning=False,
-        # )
-        # if res is None:
-        #     print("移动到目标位置失败，取消放置")
-        #     self.move_to_home(gripper_angle_deg=80)
-        #     return False
-        # time.sleep(self.catch_time_interval_s)
-        return True
-
-    def catch_and_place(
-        self,
-        target_x: float,
-        target_y: float,
-        catch_rotate_rad: float,
-        place_pos: list[float | int] = [0.2, 0.0],
-        height: float = inf,
-        place_rotate_rad: float = 0,
-    ):
-        """
-        机械臂抓取物体并放到初始位置
-        target_x, target_y: 目标物体位置，单位米
-        rad: 物体旋转角度，单位弧度
-        place_pos: 放置位置[x, y]或[x, y, z]，单位米，默认[0.2, 0.0, 桌面高度]
-        height: 目标物体高度，单位米，默认桌面高度
-        """
-        if len(place_pos) == 2:
-            place_x, place_y = place_pos
-            place_z = self.desktop_height
-        elif len(place_pos) == 3:
-            place_x, place_y, place_z = place_pos
-        else:
-            print("放置位置格式错误，应该是[x, y]或[x, y, z]")
-            return False
-        if not self.catch(target_x, target_y, catch_rotate_rad, height=height):
-            self.move_to_home(gripper_angle_deg=80)
-            return False
-        self.move_to_home()
-        if not self.place(place_x, place_y, place_z, place_rotate_rad):
-            self.move_to_home(gripper_angle_deg=80)
-            return False
-        self.move_to_home(gripper_angle_deg=80)
-        return True
 
     @staticmethod
     def _ik_cost_function(
         joint_angles, target_pose_matrix, chain, position_weight, rotation_weight
     ):
-        """
-        定义一个带权重的代价函数。
-        """
-        # 计算当前关节角度下的末端位姿
         current_fk = chain.forward_kinematics(joint_angles)
         current_pose_matrix = current_fk.matrix()
 
-        # 计算位置误差 (欧氏距离的平方)
         pos_error = np.linalg.norm(
-            (current_pose_matrix[:3, 3] - target_pose_matrix[:3, 3])
+            current_pose_matrix[:3, 3] - target_pose_matrix[:3, 3]
         )
 
-        # 计算姿态误差
         rot_error = (
             R.from_matrix(current_pose_matrix[:3, :3])
             * R.from_matrix(target_pose_matrix[:3, :3]).inv()
         ).magnitude()
 
-        # 返回加权总误差
-        total_cost = (position_weight * pos_error) + \
-            (rotation_weight * rot_error)
-        return total_cost
+        return (position_weight * pos_error) + (rotation_weight * rot_error)
 
 
 if __name__ == "__main__":

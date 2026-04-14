@@ -3,7 +3,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from arm.lerobo_arm_control import Arm
+from arm.arm_base import Arm
 import numpy as np
 import time
 from pynput import keyboard
@@ -70,7 +70,10 @@ def main():
     input_thread.daemon = True
     input_thread.start()
     arm = Arm()
-    POS[:3] = arm.move_to_home(gripper_angle_deg=80).pos  # type: ignore
+    arm.move_to_home(gripper_angle_deg=80)
+    pos = arm.get_arm_pos()
+    if pos:
+        POS[:3] = pos
     time.sleep(1)
     while True:
         try:
