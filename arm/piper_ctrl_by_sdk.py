@@ -252,7 +252,6 @@ class PiperBySDK(Arm):
             )
             * self.FACTOR
         )
-        pass
         self.piper.EndPoseCtrl(
             X=int(position_scaled[0]),
             Y=int(position_scaled[1]),
