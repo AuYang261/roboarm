@@ -25,6 +25,7 @@ class PiperBySDK(Arm):
     DEFAULT_EULER_DEG = [0.0, 60.0, 0.0]
     # 默认末端朝下的欧拉角 [RZ, RY, RX]（度）
     DEFAULT_DOWN_EULER_DEG = [0.0, 150.0, 0.0]
+    MAX_GRIPPER_ANGLE_DEG = 100
 
     def __init__(self, move_mode_end_pose: bool = True, debug_mode=True):
         super().__init__()
@@ -100,17 +101,7 @@ class PiperBySDK(Arm):
     ) -> tuple[Union[List[float], None], Union[float, None]]:
         try:
             joints = self.piper.GetArmJointMsgs()
-            angles_deg = [
-                joints.joint_state.joint_1 / self.FACTOR,
-                joints.joint_state.joint_2 / self.FACTOR,
-                joints.joint_state.joint_3 / self.FACTOR,
-                joints.joint_state.joint_4 / self.FACTOR,
-                joints.joint_state.joint_5 / self.FACTOR,
-                joints.joint_state.joint_6 / self.FACTOR,
-            ]
             gripper_msgs = self.piper.GetArmGripperMsgs()
-            gripper_deg = gripper_msgs.gripper_state.grippers_angle / self.FACTOR
-            return angles_deg, gripper_deg
         except Exception:
             if retry_times is None:
                 retry_times = self.get_arm_angles_retry_times
@@ -118,6 +109,16 @@ class PiperBySDK(Arm):
                 time.sleep(self.catch_time_interval_s)
                 return self.get_arm_angles(retry_times - 1)
             return None, None
+        angles_deg = [
+            joints.joint_state.joint_1 / self.FACTOR,
+            joints.joint_state.joint_2 / self.FACTOR,
+            joints.joint_state.joint_3 / self.FACTOR,
+            joints.joint_state.joint_4 / self.FACTOR,
+            joints.joint_state.joint_5 / self.FACTOR,
+            joints.joint_state.joint_6 / self.FACTOR,
+        ]
+        gripper_0to1 = gripper_msgs.gripper_state.grippers_angle / self.FACTOR
+        return angles_deg, np.clip(gripper_0to1 / self.MAX_GRIPPER_ANGLE_DEG, 0, 1)
 
     def get_arm_pos(self) -> list[float] | None:
         try:
@@ -125,18 +126,20 @@ class PiperBySDK(Arm):
         except Exception:
             return None
 
-    def move_to_home(self, gripper_open_0to1: float | None = None):
+    def move_to_home(self, gripper_open_0to1: float | None = None) -> bool:
         if self.move_mode_end_pose:
             self.set_move_mode(move_mode_end_pose=False)
 
         self.piper.JointCtrl(0, 0, 0, 0, 0, 0)
         start = time.time()
+        flag = True
         while True:
             status = self.piper.GetArmStatus()
             if status.arm_status.motion_status == 0x00:
                 break
             if time.time() - start > self.timeout:
                 print("move_to_home 超时")
+                flag = False
                 break
 
         if gripper_open_0to1 is not None:
@@ -145,13 +148,15 @@ class PiperBySDK(Arm):
         if self.move_mode_end_pose:
             self.set_move_mode(move_mode_end_pose=True)
 
+        return flag
+
     def move_to(
         self,
         pos: list[float],
         gripper_open_0to1: float | None = None,
         rot_rad: float | int | None = None,
         euler_angles_deg_zyx: list[float] | None = None,
-    ):
+    ) -> bool:
         if len(pos) != 3:
             raise ValueError("位置参数格式错误，应该是[x, y, z]")
 
@@ -160,18 +165,20 @@ class PiperBySDK(Arm):
             self.move_mode_end_pose = True
 
         if not euler_angles_deg_zyx is None:
-            self.set_ee_pose(position=pos, euler_angles_deg_zyx=euler_angles_deg_zyx)
+            res = self.set_ee_pose(
+                position=pos, euler_angles_deg_zyx=euler_angles_deg_zyx
+            )
         else:
             euler = list(self.DEFAULT_DOWN_EULER_DEG)
             if rot_rad is not None:
                 euler[0] = np.degrees(rot_rad)
 
-            self.set_ee_pose(position=pos, euler_angles_deg_zyx=euler)
+            res = self.set_ee_pose(position=pos, euler_angles_deg_zyx=euler)
 
         if gripper_open_0to1 is not None:
             self.set_gripper(gripper_open_0to1=gripper_open_0to1)
 
-        return self.get_arm_angles()
+        return res
 
     def disconnect_arm(self):
         print("Resetting piper arm to initial state.")
@@ -242,7 +249,9 @@ class PiperBySDK(Arm):
             degrees=True,
         ).as_quat()
 
-    def set_ee_pose(self, position: list[float], euler_angles_deg_zyx: list[float]):
+    def set_ee_pose(
+        self, position: list[float], euler_angles_deg_zyx: list[float]
+    ) -> bool:
         if self.move_mode_end_pose is False:
             raise RuntimeError("Cannot set end-effector pose in joint control mode.")
         position_scaled = np.array(position) * self.FACTOR * 1000.0
@@ -266,12 +275,12 @@ class PiperBySDK(Arm):
             status = self.piper.GetArmStatus().arm_status
             if status.arm_status != 0x0:
                 print(self.arm_status2str(status.arm_status))
-                break
+                return False
             if status.motion_status == 0x00:
-                break
+                return True
             if time.time() - start > self.timeout:
                 print("set_ee_pose 超时")
-                break
+                return False
 
     def set_gripper(self, gripper_open_0to1: float):
         """
@@ -280,7 +289,7 @@ class PiperBySDK(Arm):
         if not 0 <= gripper_open_0to1 <= 1:
             raise ValueError("gripper_open_0to1 must in [0, 1]")
         self.piper.GripperCtrl(
-            int(gripper_open_0to1 * 100 * self.FACTOR),
+            int(gripper_open_0to1 * self.MAX_GRIPPER_ANGLE_DEG * self.FACTOR),
             gripper_effort=2000 if self.debug_mode else 5000,
             gripper_code=0x03,
             set_zero=0,
@@ -414,7 +423,7 @@ class PiperBySDK(Arm):
 
 
 if __name__ == "__main__":
-    arm: PiperBySDK = Arm(debug_mode=False)
+    arm: PiperBySDK = Arm(debug_mode=False)  # type:ignore
     time.sleep(1)
     print("关节角度:", arm.get_arm_angles())
     print("末端位置:", np.array(arm.get_arm_pos()).round(2).tolist())

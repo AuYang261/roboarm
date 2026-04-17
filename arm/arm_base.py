@@ -5,7 +5,8 @@ from math import inf
 import cv2
 import numpy as np
 from config_getter import get_config_value
-from typing import Any
+from typing import cast
+from typing_extensions import Self
 import importlib
 
 
@@ -16,7 +17,7 @@ class Arm:
         "lerobo": ("arm.lerobo_arm_control", "LeroboArm"),
     }
 
-    def __new__(cls, *args, **kwargs) -> Any:
+    def __new__(cls, *args, **kwargs) -> Self:
         if cls is Arm:
             arm_type = get_config_value("arm_type")
             entry = cls._ARM_TYPES.get(arm_type)
@@ -28,7 +29,7 @@ class Arm:
             module_path, class_name = entry
             module = importlib.import_module(module_path)
             target_class = getattr(module, class_name)
-            return super().__new__(target_class)
+            return cast(Self, super().__new__(target_class))
         return super().__new__(cls)
 
     def __init__(
@@ -61,7 +62,7 @@ class Arm:
         """
         设置机械臂角度和夹爪张开角度
         angles: 机械臂各关节角度列表，单位度，顺序从底座到末端执行器，None表示不改变当前角度
-        gripper_angle: 夹爪张开角度，范围0-1，越大越开，None表示不改变当前角度
+        gripper_open_0to1: 夹爪张开程度，范围0-1，越大越开，None表示不改变当前角度
         """
         raise NotImplementedError(
             "set_arm_angles method must be implemented in subclass"
@@ -70,6 +71,9 @@ class Arm:
     def get_arm_angles(
         self, retry_times=None
     ) -> tuple[list[float] | None, float | None]:
+        """
+        返回夹爪张开程度，范围0-1，越大越开
+        """
         raise NotImplementedError(
             "get_arm_angles method must be implemented in subclass"
         )
@@ -79,7 +83,7 @@ class Arm:
             "get_arm_pos method must be implemented in subclass"
         )
 
-    def move_to_home(self, gripper_open_0to1: float | int | None = None):
+    def move_to_home(self, gripper_open_0to1: float | int | None = None) -> bool:
         raise NotImplementedError(
             "move_to_home method must be implemented in subclass"
         )
@@ -89,12 +93,14 @@ class Arm:
         pos: list[float],
         gripper_open_0to1: float | int | None = None,
         rot_rad: float | int | None = None,
-    ):
+    ) -> bool:
         """
         机械臂移动到指定位置，单位米
-        pos: [x, y, z]
-        gripper_open_0to1: 夹爪张开角度，范围0-1，越大越开，None表示不改变当前角度
-        rot_rad: 末端执行器绕z轴旋转角度，单位弧度，None表示不改变当前角度
+        - pos: [x, y, z]
+        - gripper_open_0to1: 夹爪张开角度，范围0-1，越大越开，None表示不改变当前角度
+        - rot_rad: 末端执行器绕z轴旋转角度，单位弧度，None表示不改变当前角度
+        # 返回值
+        - （除夹爪外的关节角度，夹爪角度）
         """
         raise NotImplementedError(
             "move_to method must be implemented in subclass")
@@ -130,7 +136,7 @@ class Arm:
             gripper_open_0to1=1,
             rot_rad=rad,
         )
-        if res is None:
+        if not res:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_open_0to1=1)
             return False
@@ -141,7 +147,7 @@ class Arm:
             gripper_open_0to1=1,
             rot_rad=rad,
         )
-        if res is None:
+        if not res:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_open_0to1=1)
             return False
@@ -155,13 +161,19 @@ class Arm:
             gripper_open_0to1=0,
             rot_rad=rad,
         )
-        if res is None:
+        if not res:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_open_0to1=1)
             return False
         time.sleep(self.catch_time_interval_s)
 
         _, gripper = self.get_arm_angles()
+
+        if not 0 <= self.default_gripper_close_threshold <= 1:
+            print(
+                "Warning: The definition of gripper state limit is [0, 1], not angle degrees."
+            )
+
         if gripper is None or gripper < self.default_gripper_close_threshold:
             print("夹取失败")
             self.uncatch_times += 1
@@ -182,7 +194,7 @@ class Arm:
             gripper_open_0to1=0,
             rot_rad=rad,
         )
-        if res is None:
+        if not res:
             print("移动到目标位置失败，取消放置")
             self.move_to_home(gripper_open_0to1=1)
             return False

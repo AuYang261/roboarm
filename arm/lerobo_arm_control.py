@@ -23,6 +23,8 @@ from lerobot.robots.koch_follower import config_koch_follower, koch_follower
 
 
 class LeroboArm(Arm):
+    MAX_GRIPPER_ANGLE_DEG = 100
+
     def __init__(
         self,
         calibration_dir=os.path.join(
@@ -102,11 +104,15 @@ class LeroboArm(Arm):
         self,
         angles_deg: Sequence[float | int] | None = None,
         gripper_open_0to1: float | None = None,
-    ):
+    ) -> bool:
         motor_names = list(self.arm.bus.motors.keys())
         action: dict[str, float] = {}
         if gripper_open_0to1 is not None:
-            action[motor_names[-1] + ".pos"] = np.clip(gripper_open_0to1 * 100, 0, 100)
+            if not 0 <= gripper_open_0to1 <= 1:
+                raise ValueError("gripper_open_0to1 must in [0, 1]")
+            action[motor_names[-1] + ".pos"] = (
+                gripper_open_0to1 * self.MAX_GRIPPER_ANGLE_DEG
+            )
         if angles_deg is not None:
             for motor_name, angle_deg in zip(motor_names[:-1], angles_deg, strict=True):
                 if angle_deg is not None:
@@ -139,7 +145,7 @@ class LeroboArm(Arm):
         self, retry_times=None
     ) -> tuple[Union[List[float], None], Union[float, None]]:
         """
-        获取机械臂各关节角度和夹爪状态，单位度
+        获取机械臂各关节角度，单位度，和夹爪状态，0~1，越大越开
         """
         try:
             angles_deg = list(self.arm.get_observation().values())
@@ -153,7 +159,7 @@ class LeroboArm(Arm):
         return [
             angle - offset
             for angle, offset in zip(angles_deg[:-1], self.offset, strict=True)
-        ], angles_deg[-1]
+        ], np.clip(angles_deg[-1] / self.MAX_GRIPPER_ANGLE_DEG, 0, 1)
 
     def get_arm_pos(self) -> list[float] | None:
         angles_deg, _ = self.get_arm_angles()
@@ -173,16 +179,15 @@ class LeroboArm(Arm):
     def disable_torque(self):
         self.arm.bus.disable_torque()
 
-    def move_to_home(self, gripper_open_0to1: float | None = None):
-        self.set_arm_angles([0, 0, 0, 0, 0], gripper_open_0to1=gripper_open_0to1)
-        return self.chain.forward_kinematics(np.deg2rad([0, 0, 0, 0, 0]).tolist())
+    def move_to_home(self, gripper_open_0to1: float | None = None) -> bool:
+        return self.set_arm_angles([0, 0, 0, 0, 0], gripper_open_0to1=gripper_open_0to1)
 
     def move_to(
         self,
         pos: List[float],
         gripper_open_0to1: float | None = None,
         rot_rad: float | int | None = None,
-    ):
+    ) -> bool:
         if not hasattr(self, "chain"):
             raise ValueError("没有机械臂模型，无法使用位置控制")
         if len(pos) != 3:
@@ -203,11 +208,11 @@ class LeroboArm(Arm):
         )
         if not angles_deg.success:
             print("逆运动学不收敛，无法到达指定位置")
-            return None
+            return False
         angles_deg = np.rad2deg(angles_deg.x).tolist()
         if not self.set_arm_angles(angles_deg, gripper_open_0to1=gripper_open_0to1):
-            return None
-        return self.get_arm_angles()
+            return False
+        return True
 
     @staticmethod
     def _ik_cost_function(
@@ -229,7 +234,7 @@ class LeroboArm(Arm):
 
 
 if __name__ == "__main__":
-    arm: LeroboArm = Arm()
+    arm: LeroboArm = Arm()  # type:ignore
     time.sleep(1)
     arm.move_to_home(gripper_open_0to1=1)
     time.sleep(1)

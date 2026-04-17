@@ -17,10 +17,14 @@ from config_getter import get_config_value
 
 
 def main():
-    arm = Arm()
     arm_type = get_config_value("arm_type")
     if arm_type == "lerobo":
+        from arm.lerobo_arm_control import LeroboArm
+
+        arm: LeroboArm = Arm()  # type:ignore
         arm.disable_torque()
+    else:
+        arm = Arm()  # type:ignore
     while True:
         print("=" * 10)
         try:

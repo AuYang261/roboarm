@@ -82,8 +82,8 @@ classification_YOLO_model_path:
 # 默认YOLO识别置信度阈值
 default_conf_thres: 0.85
 
-# 夹爪闭合角度阈值，小于该值认为夹取失败，单位度
-default_gripper_close_threshold: 3
+# 夹爪闭合阈值，小于该值认为夹取失败，范围是[0,1]，越大越开，1表示完全张开（不是角度）
+default_gripper_close_threshold: 0.05
 
 # 各类别放置位置，(x,y)，单位米
 class_pos:
