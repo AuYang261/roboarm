@@ -670,7 +670,9 @@ def main():
         "--port", type=int, default=8083, help="Port to bind the server"
     )
     parser.add_argument("--idx", type=int, default=4, help="camera index")
-    parser.add_argument("--mode", type=str, default="multi", help="Video source (default: rgb)")
+    parser.add_argument(
+        "--mode", type=str, default="multi", help="Video source (default: multi)"
+    )
     args = parser.parse_args()
     if args.mode == "none":
         display_stream()

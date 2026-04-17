@@ -226,7 +226,9 @@ def main():
     parser = argparse.ArgumentParser(description="Web Camera Client")
     parser.add_argument("--host", type=str, default="localhost", help="Server host")
     parser.add_argument("--port", type=int, default=8083, help="Server port")
-    parser.add_argument("--mode", type=str, default="multi", help="Video source (default: rgb)")
+    parser.add_argument(
+        "--mode", type=str, default="multi", help="Video source (default: multi)"
+    )
     args = parser.parse_args()
 
     if args.mode == "none":
