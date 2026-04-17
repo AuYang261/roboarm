@@ -19,15 +19,23 @@ import re
 
 
 class PiperBySDK(Arm):
+    """Piper SDK 机械臂控制实现。"""
+
     FACTOR = 1000.0
-    joint_num = 6
+    JOINT_COUNT = 6
     # 默认末端朝前的欧拉角 [RZ, RY, RX]（度）
-    DEFAULT_EULER_DEG = [0.0, 60.0, 0.0]
+    DEFAULT_EULER_DEG_ZYX = [0.0, 60.0, 0.0]
     # 默认末端朝下的欧拉角 [RZ, RY, RX]（度）
-    DEFAULT_DOWN_EULER_DEG = [0.0, 150.0, 0.0]
+    DEFAULT_DOWN_EULER_DEG_ZYX = [0.0, 150.0, 0.0]
     MAX_GRIPPER_ANGLE_DEG = 100
 
-    def __init__(self, move_mode_end_pose: bool = True, debug_mode=True):
+    def __init__(self, move_mode_end_pose: bool = True, debug_mode: bool = True):
+        """初始化 Piper 机械臂控制器。
+
+        Args:
+            move_mode_end_pose: 是否默认使用末端位姿控制模式。
+            debug_mode: 是否使用调试模式；调试模式下速度更保守、超时更长。
+        """
         super().__init__()
         self.debug_mode = debug_mode
         self.move_mode_end_pose = move_mode_end_pose
@@ -59,12 +67,19 @@ class PiperBySDK(Arm):
         gripper_open_0to1: float | int | None = None,
     ) -> bool:
         if gripper_open_0to1 is not None:
-            self.set_gripper(gripper_open_0to1=gripper_open_0to1)
+            if not 0 <= gripper_open_0to1 <= 1:
+                raise ValueError("gripper_open_0to1 must in [0, 1]")
+            self.piper.GripperCtrl(
+                int(gripper_open_0to1 * self.MAX_GRIPPER_ANGLE_DEG * self.FACTOR),
+                gripper_effort=2000 if self.debug_mode else 5000,
+                gripper_code=0x03,
+                set_zero=0,
+            )
 
         if angles_deg is not None:
-            if len(angles_deg) != self.joint_num:
+            if len(angles_deg) != self.JOINT_COUNT:
                 print(
-                    f"关节角度数量错误，期望{self.joint_num}个，实际{len(angles_deg)}个"
+                    f"关节角度数量错误，期望{self.JOINT_COUNT}个，实际{len(angles_deg)}个"
                 )
                 return False
             was_end_pose = self.move_mode_end_pose
@@ -157,6 +172,18 @@ class PiperBySDK(Arm):
         rot_rad: float | int | None = None,
         euler_angles_deg_zyx: list[float] | None = None,
     ) -> bool:
+        """将末端移动到目标位置。
+
+        Args:
+            pos: 目标位置 `[x, y, z]`，单位为米。
+            gripper_open_0to1: 夹爪开合程度，范围为 `[0, 1]`；`None` 表示不修改。
+            rot_rad: 末端绕 z 轴的目标旋转角，单位为弧度；仅在未显式传入
+                `euler_angles_deg_zyx` 时生效。
+            euler_angles_deg_zyx: 目标末端欧拉角 `[RZ, RY, RX]`，单位为度。
+
+        Returns:
+            移动是否成功。
+        """
         if len(pos) != 3:
             raise ValueError("位置参数格式错误，应该是[x, y, z]")
 
@@ -169,16 +196,21 @@ class PiperBySDK(Arm):
                 position=pos, euler_angles_deg_zyx=euler_angles_deg_zyx
             )
         else:
-            euler = list(self.DEFAULT_DOWN_EULER_DEG)
+            euler_angles_deg_zyx = list(self.DEFAULT_DOWN_EULER_DEG_ZYX)
             if rot_rad is not None:
-                euler[0] = np.degrees(rot_rad)
+                euler_angles_deg_zyx[0] = np.degrees(rot_rad)
 
-            res = self.set_ee_pose(position=pos, euler_angles_deg_zyx=euler)
+            res = self.set_ee_pose(
+                position=pos, euler_angles_deg_zyx=euler_angles_deg_zyx
+            )
 
         if gripper_open_0to1 is not None:
             self.set_gripper(gripper_open_0to1=gripper_open_0to1)
 
         return res
+
+    def set_gripper(self, gripper_open_0to1: float):
+        self.set_arm_angles(gripper_open_0to1=gripper_open_0to1)
 
     def disconnect_arm(self):
         print("Resetting piper arm to initial state.")
@@ -207,6 +239,12 @@ class PiperBySDK(Arm):
     # ========== 内部方法 ==========
 
     def reset(self, move_mode_end_pose: bool | None = None):
+        """复位机械臂并根据需要恢复控制模式。
+
+        Args:
+            move_mode_end_pose: 复位后是否切换到末端位姿控制模式；`None`
+                表示保留当前模式。
+        """
         self.piper.JointConfig(clear_err=0xAE)
         self.piper.CrashProtectionConfig(0, 0, 0, 0, 0, 0)
         self.move_to_home(gripper_open_0to1=1)
@@ -217,6 +255,11 @@ class PiperBySDK(Arm):
             self.set_move_mode(move_mode_end_pose=True)
 
     def get_ee_pos(self) -> np.ndarray:
+        """读取当前末端位置。
+
+        Returns:
+            当前末端位置 `[x, y, z]`，单位为米。
+        """
         end_pose = self.piper.GetArmEndPoseMsgs().end_pose
         return (
             np.array(
@@ -228,6 +271,11 @@ class PiperBySDK(Arm):
         )
 
     def get_ee_euler_zyx(self) -> np.ndarray:
+        """读取当前末端欧拉角。
+
+        Returns:
+            当前末端欧拉角 `[RZ, RY, RX]`，单位为度。
+        """
         # GetArmEndPoseMsgs获取到的欧拉角顺序是xyz
         end_pose = self.piper.GetArmEndPoseMsgs().end_pose
         return R.from_euler(
@@ -241,6 +289,11 @@ class PiperBySDK(Arm):
         ).as_euler("zyx", degrees=True)
 
     def get_ee_quat(self) -> np.ndarray:
+        """读取当前末端四元数姿态。
+
+        Returns:
+            当前末端姿态四元数 `[x, y, z, w]`。
+        """
         end_pose = self.piper.GetArmEndPoseMsgs().end_pose
         return R.from_euler(
             "xyz",
@@ -252,6 +305,15 @@ class PiperBySDK(Arm):
     def set_ee_pose(
         self, position: list[float], euler_angles_deg_zyx: list[float]
     ) -> bool:
+        """设置末端位姿。
+
+        Args:
+            position: 目标位置 `[x, y, z]`，单位为米。
+            euler_angles_deg_zyx: 目标欧拉角 `[RZ, RY, RX]`，单位为度。
+
+        Returns:
+            设置是否成功。
+        """
         if self.move_mode_end_pose is False:
             raise RuntimeError("Cannot set end-effector pose in joint control mode.")
         position_scaled = np.array(position) * self.FACTOR * 1000.0
@@ -282,20 +344,12 @@ class PiperBySDK(Arm):
                 print("set_ee_pose 超时")
                 return False
 
-    def set_gripper(self, gripper_open_0to1: float):
-        """
-        夹爪开闭程度，越大越开，0~1
-        """
-        if not 0 <= gripper_open_0to1 <= 1:
-            raise ValueError("gripper_open_0to1 must in [0, 1]")
-        self.piper.GripperCtrl(
-            int(gripper_open_0to1 * self.MAX_GRIPPER_ANGLE_DEG * self.FACTOR),
-            gripper_effort=2000 if self.debug_mode else 5000,
-            gripper_code=0x03,
-            set_zero=0,
-        )
-
     def _enable_fun(self) -> bool:
+        """循环尝试使能全部关节驱动。
+
+        Returns:
+            是否在超时时间内完成使能。
+        """
         start_time = time.time()
         while True:
             print("--------------------")
@@ -319,8 +373,10 @@ class PiperBySDK(Arm):
             time.sleep(1)
 
     def activate_can(self):
-        """
-        自动查找并激活机械臂对应的 CAN 端口。
+        """扫描并激活可用的机械臂 CAN 端口。
+
+        Returns:
+            成功激活的 CAN 接口名列表。
         """
         base_dir = Path(piper_sdk.__file__).parent
         find_script = base_dir / "find_all_can_port.sh"
@@ -383,6 +439,15 @@ class PiperBySDK(Arm):
         return ret
 
     def set_move_mode(self, move_mode_end_pose: bool):
+        """切换机械臂控制模式。
+
+        Args:
+            move_mode_end_pose: `True` 表示切换到末端位姿控制，`False`
+                表示切换到关节控制。
+
+        Raises:
+            TimeoutError: 在超时时间内未完成模式切换时抛出。
+        """
         start = time.time()
         self.piper.MotionCtrl_2(
             ctrl_mode=0x01,
@@ -401,6 +466,7 @@ class PiperBySDK(Arm):
 
     @staticmethod
     def arm_status2str(status):
+        """将机械臂状态码转换为可读文本。"""
         status_dict = {
             0x00: "正常",
             0x01: "急停",

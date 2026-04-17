@@ -6,7 +6,7 @@
 # 2. piper
 #    先通过.venv/lib/python3.10/site-packages/piper_sdk/demo/V2/piper_set_joint_zero.py脚本设置零点
 #    然后运行此脚本
-#   （暂不清楚零点不同的本体，指定相同的位姿是否会有相同表现，如果是则无需运行此脚本，待测试。目前是硬编码DEFAULT_DOWN_EULER_DEG）
+#   （暂不清楚零点不同的本体，指定相同的位姿是否会有相同表现，如果是则无需运行此脚本，待测试。目前是硬编码DEFAULT_DOWN_EULER_DEG_ZYX）
 import os
 import sys
 

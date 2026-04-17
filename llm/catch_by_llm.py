@@ -130,7 +130,7 @@ def catch_by_instruction(
         class_pos = get_config_value("class_pos")
         offset = get_config_value("catch_offset")
         default_gripper_aside_pos = get_config_value("default_gripper_aside_pos")
-        arm.move_to(default_gripper_aside_pos, 80)
+        arm.move_to(default_gripper_aside_pos)
         time.sleep(0.5)
         print("LLM Detecting...")
         start = time.time()

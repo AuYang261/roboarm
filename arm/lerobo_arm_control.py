@@ -23,6 +23,8 @@ from lerobot.robots.koch_follower import config_koch_follower, koch_follower
 
 
 class LeroboArm(Arm):
+    """LeRobot koch_follower 机械臂控制实现。"""
+
     MAX_GRIPPER_ANGLE_DEG = 100
 
     def __init__(
@@ -30,18 +32,19 @@ class LeroboArm(Arm):
         calibration_dir=os.path.join(
             os.path.dirname(os.path.dirname(__file__)), "calibration"
         ),
-        id="koch_follower",
+        robot_id="koch_follower",
         hand_eye_calibration_file=os.path.join(
             os.path.dirname(__file__), "hand-eye-data/2d_homography.npy"
         ),
         steps=20,
     ):
-        """
-        初始化机械臂
-        calibration_dir: 标定文件夹路径，包含机械臂offset文件
-        id: 机械臂型号，默认"koch_follower"
-        hand_eye_calibration_file: 手眼标定文件路径，默认"hand-eye-data/2d_homography.npy"
-        steps: 机械臂插值移动步数，步数越多越平滑但越慢
+        """初始化 LeRobot 机械臂控制器。
+
+        Args:
+            calibration_dir: 标定文件目录，包含机械臂 offset 文件。
+            robot_id: 机械臂在 LeRobot 中的设备标识。
+            hand_eye_calibration_file: 手眼标定矩阵文件路径。
+            steps: 插值步数，越大越平滑，但耗时越长。
         """
         super().__init__(hand_eye_calibration_file=hand_eye_calibration_file)
         port = get_config_value("arm_port")
@@ -73,7 +76,7 @@ class LeroboArm(Arm):
                 port=port,
                 disable_torque_on_disconnect=True,
                 use_degrees=True,
-                id=id,
+                id=robot_id,
                 calibration_dir=Path(calibration_dir).resolve(),
             )
         )
@@ -118,10 +121,10 @@ class LeroboArm(Arm):
                 if angle_deg is not None:
                     action[motor_name + ".pos"] = np.clip(angle_deg, -180, 180)
         if len(action) > 0:
-            current_angles_deg, current_gripper_deg = self.get_arm_angles()
-            if current_angles_deg is None or current_gripper_deg is None:
+            current_angles_deg, current_gripper_0to1 = self.get_arm_angles()
+            if current_angles_deg is None or current_gripper_0to1 is None:
                 return False
-            current_angles_deg.append(current_gripper_deg)
+            current_angles_deg.append(current_gripper_0to1 * self.MAX_GRIPPER_ANGLE_DEG)
             for alpha in np.linspace(0, 1, self.steps + 1)[1:]:
                 interp_action = {}
                 for key, value in action.items():
@@ -144,8 +147,15 @@ class LeroboArm(Arm):
     def get_arm_angles(
         self, retry_times=None
     ) -> tuple[Union[List[float], None], Union[float, None]]:
-        """
-        获取机械臂各关节角度，单位度，和夹爪状态，0~1，越大越开
+        """获取机械臂各关节角度和夹爪开合程度。
+
+        Args:
+            retry_times: 读取失败后的重试次数；`None` 表示使用默认配置。
+
+        Returns:
+            一个二元组 `(angles_deg, gripper_open_0to1)`：
+            - `angles_deg` 为关节角度列表，单位为度；失败时为 `None`
+            - `gripper_open_0to1` 为夹爪开合程度，范围为 `[0, 1]`；失败时为 `None`
         """
         try:
             angles_deg = list(self.arm.get_observation().values())
@@ -213,6 +223,9 @@ class LeroboArm(Arm):
         if not self.set_arm_angles(angles_deg, gripper_open_0to1=gripper_open_0to1):
             return False
         return True
+
+    def set_gripper(self, gripper_open_0to1: float):
+        self.set_arm_angles(gripper_open_0to1=gripper_open_0to1)
 
     @staticmethod
     def _ik_cost_function(

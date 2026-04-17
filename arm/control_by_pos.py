@@ -9,50 +9,53 @@ import time
 from pynput import keyboard
 import threading
 
-POS: list[float] = [0, 0.1, 0.1, 0, 0]  # x, y, z, gripper_open_0to1
+ROT_STEP_RAD = 0.1
+MAX_ROT_RAD = np.pi / 2
+TARGET_POSE: list[float] = [0, 0.1, 0.1, 0, 0]  # x, y, z, rot_rad, gripper_open_0to1
 
 
 def on_press(key):
-    global POS
+    global TARGET_POSE
     try:
-        if key.char == "w" and POS[1] < 0.3:
-            POS[1] += 0.01
-            print("Current position:", POS)
-        elif key.char == "s" and POS[1] > 0:
-            POS[1] -= 0.01
-            print("Current position:", POS)
-        elif key.char == "a" and POS[0] > -0.2:
-            POS[0] -= 0.01
-            print("Current position:", POS)
-        elif key.char == "d" and POS[0] < 0.2:
-            POS[0] += 0.01
-            print("Current position:", POS)
-        elif key.char == "z" and POS[3] < 90:
-            POS[3] += 0.1
-            print("Current position:", POS)
-        elif key.char == "c" and POS[3] > 0:
-            POS[3] -= 0.1
-            print("Current position:", POS)
+        if key.char == "w" and TARGET_POSE[1] < 0.3:
+            TARGET_POSE[1] += 0.01
+            print("Current position:", TARGET_POSE)
+        elif key.char == "s" and TARGET_POSE[1] > 0:
+            TARGET_POSE[1] -= 0.01
+            print("Current position:", TARGET_POSE)
+        elif key.char == "a" and TARGET_POSE[0] > -0.2:
+            TARGET_POSE[0] -= 0.01
+            print("Current position:", TARGET_POSE)
+        elif key.char == "d" and TARGET_POSE[0] < 0.2:
+            TARGET_POSE[0] += 0.01
+            print("Current position:", TARGET_POSE)
+        elif key.char == "z" and TARGET_POSE[3] < MAX_ROT_RAD:
+            TARGET_POSE[3] += ROT_STEP_RAD
+            print("Current position:", TARGET_POSE)
+        elif key.char == "c" and TARGET_POSE[3] > 0:
+            TARGET_POSE[3] -= ROT_STEP_RAD
+            print("Current position:", TARGET_POSE)
         elif key.char == "e":
-            POS[4] = 0
-            print("Current position:", POS)
+            TARGET_POSE[4] = 0
+            print("Current position:", TARGET_POSE)
         elif key.char == "q":
-            POS[4] = 1
-            print("Current position:", POS)
+            TARGET_POSE[4] = 1
+            print("Current position:", TARGET_POSE)
         elif key.char == "r":
-            # 随机
-            POS[:3] = np.random.uniform([-0.2, 0, 0.07], [0.2, 0.3, 0.17]).tolist()
-            print("Current position:", POS)
+            TARGET_POSE[:3] = np.random.uniform(
+                [-0.2, 0, 0.07], [0.2, 0.3, 0.17]
+            ).tolist()
+            print("Current position:", TARGET_POSE)
     except AttributeError:
-        if key == keyboard.Key.shift and POS[2] > 0.05:
-            POS[2] -= 0.01
-            print("Current position:", POS)
-        elif key == keyboard.Key.space and POS[2] < 0.2:
-            POS[2] += 0.01
-            print("Current position:", POS)
+        if key == keyboard.Key.shift and TARGET_POSE[2] > 0.05:
+            TARGET_POSE[2] -= 0.01
+            print("Current position:", TARGET_POSE)
+        elif key == keyboard.Key.space and TARGET_POSE[2] < 0.2:
+            TARGET_POSE[2] += 0.01
+            print("Current position:", TARGET_POSE)
         elif key == keyboard.Key.esc:
             print("Exiting...")
-            POS = []
+            TARGET_POSE = []
 
 
 def on_release(key):
@@ -65,7 +68,7 @@ def get_input():
 
 
 def main():
-    global POS
+    global TARGET_POSE
     input_thread = threading.Thread(target=get_input)
     input_thread.daemon = True
     input_thread.start()
@@ -73,15 +76,19 @@ def main():
     arm.move_to_home(gripper_open_0to1=1)
     pos = arm.get_arm_pos()
     if pos:
-        POS[:3] = pos
+        TARGET_POSE[:3] = pos
     time.sleep(1)
     while True:
         try:
-            if len(POS) != 5:
+            if len(TARGET_POSE) != 5:
                 arm.move_to_home(gripper_open_0to1=1)
                 arm.disconnect_arm()
                 return
-            arm.move_to(POS[:3], gripper_open_0to1=POS[4], rot_rad=POS[3])
+            arm.move_to(
+                TARGET_POSE[:3],
+                gripper_open_0to1=TARGET_POSE[4],
+                rot_rad=TARGET_POSE[3],
+            )
         except Exception as e:
             print("Error:", e)
             time.sleep(0.5)

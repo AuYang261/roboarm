@@ -96,7 +96,6 @@ def main():
                 future = executor.submit(
                     arm.move_to,
                     default_gripper_aside_pos,
-                    80,
                 )
             end_time = time.time()
             if end_time - start_time == 0:
