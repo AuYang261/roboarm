@@ -109,13 +109,15 @@ class Arm:
             "get_arm_angles method must be implemented in subclass"
         )
 
-    def get_arm_pos(self) -> list[float] | None:
-        """读取当前末端位置。
+    def get_arm_pose(self) -> tuple[list[float] | None, list[float] | None]:
+        """读取当前末端位姿。
 
         Returns:
-            末端位置 `[x, y, z]`，单位为米；读取失败时返回 `None`。
+            一个二元组 `(end_pos, end_rot)`
+            - `end_pos` 为末端位置 `[x, y, z]`，单位为米；读取失败时返回 `None`。
+            - `end_rot` 为末端姿态 `[RZ, RY, RX]`，单位为角度；读取失败时返回 `None`。
         """
-        raise NotImplementedError("get_arm_pos method must be implemented in subclass")
+        raise NotImplementedError("get_arm_pose method must be implemented in subclass")
 
     def move_to_home(self, gripper_open_0to1: float | int | None = None) -> bool:
         """将机械臂移动到归零位。
@@ -133,14 +135,16 @@ class Arm:
         pos: list[float],
         gripper_open_0to1: float | int | None = None,
         rot_rad: float | int | None = None,
+        euler_angles_deg_zyx: list[float] | None = None,
     ) -> bool:
         """将末端移动到目标位置。
 
         Args:
             pos: 目标位置 `[x, y, z]`，单位为米。
             gripper_open_0to1: 夹爪开合程度，范围为 `[0, 1]`；`None` 表示不修改。
-            rot_rad: 末端绕 z 轴的目标旋转角，单位为弧度；`None` 表示由子类
-                使用默认姿态或保持当前姿态。
+            rot_rad: 末端绕 z 轴的目标旋转角，单位为弧度；仅在未显式传入
+                `euler_angles_deg_zyx` 时生效。
+            euler_angles_deg_zyx: 目标末端欧拉角 `[RZ, RY, RX]`，单位为度。
 
         Returns:
             移动是否成功。

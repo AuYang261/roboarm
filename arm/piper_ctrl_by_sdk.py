@@ -135,11 +135,11 @@ class PiperBySDK(Arm):
         gripper_0to1 = gripper_msgs.gripper_state.grippers_angle / self.FACTOR
         return angles_deg, np.clip(gripper_0to1 / self.MAX_GRIPPER_ANGLE_DEG, 0, 1)
 
-    def get_arm_pos(self) -> list[float] | None:
+    def get_arm_pose(self) -> tuple[list[float] | None, list[float] | None]:
         try:
-            return self.get_ee_pos().tolist()
+            return self.get_ee_pos().tolist(), self.get_ee_euler_zyx().tolist()
         except Exception:
-            return None
+            return None, None
 
     def move_to_home(self, gripper_open_0to1: float | None = None) -> bool:
         if self.move_mode_end_pose:
@@ -172,18 +172,6 @@ class PiperBySDK(Arm):
         rot_rad: float | int | None = None,
         euler_angles_deg_zyx: list[float] | None = None,
     ) -> bool:
-        """将末端移动到目标位置。
-
-        Args:
-            pos: 目标位置 `[x, y, z]`，单位为米。
-            gripper_open_0to1: 夹爪开合程度，范围为 `[0, 1]`；`None` 表示不修改。
-            rot_rad: 末端绕 z 轴的目标旋转角，单位为弧度；仅在未显式传入
-                `euler_angles_deg_zyx` 时生效。
-            euler_angles_deg_zyx: 目标末端欧拉角 `[RZ, RY, RX]`，单位为度。
-
-        Returns:
-            移动是否成功。
-        """
         if len(pos) != 3:
             raise ValueError("位置参数格式错误，应该是[x, y, z]")
 
@@ -352,7 +340,6 @@ class PiperBySDK(Arm):
         """
         start_time = time.time()
         while True:
-            print("--------------------")
             self.piper.EnableArm(7)
             msgs = self.piper.GetArmLowSpdInfoMsgs()
             enable_flag = (
@@ -364,7 +351,6 @@ class PiperBySDK(Arm):
                 and msgs.motor_6.foc_status.driver_enable_status
             )
             print("使能状态:", enable_flag)
-            print("--------------------")
             if enable_flag:
                 return True
             if time.time() - start_time > self.timeout:
@@ -492,19 +478,21 @@ if __name__ == "__main__":
     arm: PiperBySDK = Arm(debug_mode=False)  # type:ignore
     time.sleep(1)
     print("关节角度:", arm.get_arm_angles())
-    print("末端位置:", np.array(arm.get_arm_pos()).round(2).tolist())
-    print("末端zyx:", arm.get_ee_euler_zyx().round(2).tolist())
+    print("末端位姿:", np.array(arm.get_arm_pose()).round(2).tolist())
 
-    arm.move_to([0.2, 0.0, 0.2], gripper_open_0to1=0, rot_rad=np.pi / 6)
+    arm.move_to([0.2, 0.2, 0.2], gripper_open_0to1=0, rot_rad=np.pi / 6 * 0)
     time.sleep(2)
     print("关节角度:", arm.get_arm_angles())
-    print("末端位置:", np.array(arm.get_arm_pos()).round(2).tolist())
-    print("末端zyx:", arm.get_ee_euler_zyx().round(2).tolist())
+    print("末端位置:", np.array(arm.get_arm_pose()).round(2).tolist())
 
     arm.move_to_home(gripper_open_0to1=1)
-    time.sleep(2)
+    time.sleep(1)
     print("关节角度:", arm.get_arm_angles())
-    print("末端位置:", np.array(arm.get_arm_pos()).round(2).tolist())
-    print("末端zyx:", arm.get_ee_euler_zyx().round(2).tolist())
+    print("末端位置:", np.array(arm.get_arm_pose()).round(2).tolist())
+
+    arm.catch_and_place(0.2, 0.0, -np.pi * 6, [0, 0.2])
+    time.sleep(1)
+    arm.move_to_home(gripper_open_0to1=1)
+    time.sleep(1)
 
     arm.disconnect_arm()

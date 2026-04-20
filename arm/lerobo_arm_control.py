@@ -171,14 +171,19 @@ class LeroboArm(Arm):
             for angle, offset in zip(angles_deg[:-1], self.offset, strict=True)
         ], np.clip(angles_deg[-1] / self.MAX_GRIPPER_ANGLE_DEG, 0, 1)
 
-    def get_arm_pos(self) -> list[float] | None:
+    def get_arm_pose(self) -> tuple[list[float] | None, list[float] | None]:
         angles_deg, _ = self.get_arm_angles()
         if angles_deg is None:
-            return None
+            return None, None
         fk: kinpy.Transform = self.chain.forward_kinematics(
             np.deg2rad(angles_deg).tolist()
         )  # type: ignore
-        return fk.pos.tolist()
+        return (
+            fk.pos.tolist(),
+            R.from_euler("xyz", fk.rot_euler, degrees=True)
+            .as_euler("zyx", degrees=True)
+            .tolist(),
+        )
 
     def disconnect_arm(self):
         self.arm.disconnect()
@@ -197,9 +202,12 @@ class LeroboArm(Arm):
         pos: List[float],
         gripper_open_0to1: float | None = None,
         rot_rad: float | int | None = None,
+        euler_angles_deg_zyx: list[float] | None = None,
     ) -> bool:
         if not hasattr(self, "chain"):
             raise ValueError("没有机械臂模型，无法使用位置控制")
+        if euler_angles_deg_zyx:
+            print("Warning: not support euler_angles_deg_zyx currently in lerobo")
         if len(pos) != 3:
             raise ValueError("位置参数格式错误，应该是[x, y, z]")
         goal_tf = kinpy.Transform(
