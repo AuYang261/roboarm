@@ -17,7 +17,6 @@ dependencies = [
     "piper-sdk>=0.6.1",
     "pydantic>=2.13.0",
     "pydub>=0.25.1",
-    "pynput>=1.8.1",
     "pyorbbecsdk2>=2.0.18",
     "python-can[gs-usb]>=4.6.1",
     "pyusb>=1.3.1",
