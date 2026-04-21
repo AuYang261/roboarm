@@ -12,6 +12,7 @@ comparison_results/
 sim/isaacSimKoch/
 IsaacLabs/
 sim/camera_simple_opt_output/
+recordings/
 
 *.txt
 .env

@@ -29,7 +29,7 @@ IP = "192.168.2.12"
 PORT = 3456
 
 STEPS = 1
-KEY_BOARD = True # 通过键盘控制
+KEY_BOARD = False # 通过键盘控制
 
 
 # mujoco-sim.py 文件名含连字符，用 importlib 加载

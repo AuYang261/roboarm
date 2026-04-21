@@ -89,7 +89,8 @@ if __name__ == '__main__':
     
     camera_list = get_camera_list()
     print(camera_list)
-    
-    usb_camera_capture(4)
-    
-    usb_camera_show(4)
+    for i in range(len(camera_list)):
+        try:
+            usb_camera_capture(i)
+        except Exception as e:
+            print(f"Error occurred while capturing camera {i}: {e}")
