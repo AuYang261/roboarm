@@ -42,6 +42,18 @@ def handle_key(key):
     elif key == "j":
         TARGET_POSE[3] -= ROT_STEP_RAD
         print("Current position:", TARGET_POSE.round(2))
+    elif key == "i":
+        TARGET_POSE[4] += ROT_STEP_RAD
+        print("Current position:", TARGET_POSE.round(2))
+    elif key == "k":
+        TARGET_POSE[4] -= ROT_STEP_RAD
+        print("Current position:", TARGET_POSE.round(2))
+    elif key == "o":
+        TARGET_POSE[5] += ROT_STEP_RAD
+        print("Current position:", TARGET_POSE.round(2))
+    elif key == "l":
+        TARGET_POSE[5] -= ROT_STEP_RAD
+        print("Current position:", TARGET_POSE.round(2))
     elif key == "e":
         TARGET_POSE[6] = 0
         print("Current position:", TARGET_POSE.round(2))

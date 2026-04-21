@@ -233,6 +233,7 @@ def collect_image_pose():
                 os.path.dirname(__file__),
                 "..",
                 "urdf",
+                "lerobo",
                 "low_cost_robot.urdf",
             )
         ).read()

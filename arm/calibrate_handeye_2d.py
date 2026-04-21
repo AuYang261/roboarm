@@ -178,8 +178,7 @@ def test_moveto_double_arm(chain: kinpy.chain.SerialChain, M, image_point):
 
 def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
     # 回调函数：获取point并移动
-    # global arm
-    # arm = Arm()
+    arm = Arm()
     def mouse_callback(event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:  # 左键点击
             print(f"Left button clicked at ({x}, {y})")
@@ -215,7 +214,7 @@ def test_handeye_2d(chain: kinpy.chain.SerialChain, homography_matrix):
 
     cv2.destroyAllWindows()
     cam.close()
-    
+
     arm.disable_torque()
     arm.disconnect_arm()
 
@@ -245,6 +244,7 @@ def main():
                 os.path.dirname(__file__),
                 "..",
                 "urdf",
+                "lerobo",
                 "low_cost_robot.urdf",
             )
         ).read()

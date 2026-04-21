@@ -100,6 +100,8 @@ class PiperBySDK(Arm):
             while True:
                 status = self.piper.GetArmStatus()
                 if status.arm_status.motion_status == 0x00:
+                    print(self.arm_status2str(status.arm_status))
+                    self.piper.JointConfig(clear_err=0xAE)
                     break
                 if time.time() - start > self.timeout:
                     print("set_arm_angles 超时")
@@ -151,6 +153,8 @@ class PiperBySDK(Arm):
         while True:
             status = self.piper.GetArmStatus()
             if status.arm_status.motion_status == 0x00:
+                print(self.arm_status2str(status.arm_status))
+                self.piper.JointConfig(clear_err=0xAE)
                 break
             if time.time() - start > self.timeout:
                 print("move_to_home 超时")
@@ -325,6 +329,7 @@ class PiperBySDK(Arm):
             status = self.piper.GetArmStatus().arm_status
             if status.arm_status != 0x0:
                 print(self.arm_status2str(status.arm_status))
+                self.piper.JointConfig(clear_err=0xAE)
                 return False
             if status.motion_status == 0x00:
                 return True

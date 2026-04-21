@@ -54,13 +54,14 @@ class LeroboArm(Arm):
         if len(self.offset) != 5:
             raise ValueError(
                 "配置文件中没有正确设置机械臂offset arm_offset, 应该是5个关节的角度列表"
-                "运行arm/calibrate.py以获取arm_offset"
+                "运行arm/calibrate_offset.py以获取arm_offset"
             )
         with open(
             os.path.join(
                 os.path.dirname(__file__),
                 "..",
                 "urdf",
+                "lerobo",
                 "low_cost_robot.urdf",
             ),
             "r",

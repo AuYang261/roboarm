@@ -61,10 +61,7 @@ class CoordinateComparator:
         # 加载URDF模型
         if urdf_path is None:
             urdf_path = os.path.join(
-                os.path.dirname(__file__),
-                "..",
-                "urdf",
-                "low_cost_robot.urdf"
+                os.path.dirname(__file__), "..", "urdf", "lerobo", "low_cost_robot.urdf"
             )
 
         with open(urdf_path, 'r', encoding='utf-8') as f:
@@ -162,7 +159,6 @@ class CoordinateComparator:
                 fk_result = self.forward_kinematics_from_joint_angles(joint_angles)
                 print(f"  正运动学位姿: {fk_result['position']}")
                 print(f"  夹爪角度: {gripper_state}")
-            
 
         cv2.setMouseCallback(window_name, mouse_callback)
 
