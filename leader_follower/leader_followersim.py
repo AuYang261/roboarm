@@ -2,6 +2,9 @@
 Leader-Follower Simulation Demo
 物理主机械臂 (leader) 控制 MuJoCo 仿真机械臂 (follower)
 读取 leader 的关节位置，转换为弧度后驱动仿真模型
+
+键盘控制情况下会出现关节异常移动的现象（如仅控制夹住移动但关节还是移动了的情况）
+
 """
 
 import sys
@@ -20,16 +23,31 @@ import yaml
 import mujoco
 import numpy as np
 
+REMOTE = True
+
+IP = "192.168.2.12"
+PORT = 3456
+
+STEPS = 1
+KEY_BOARD = True # 通过键盘控制
+
+
 # mujoco-sim.py 文件名含连字符，用 importlib 加载
-_sim_path = os.path.join(os.path.dirname(__file__), "..", "sim", "mujoco-sim.py")
-_spec = importlib.util.spec_from_file_location("mujoco_sim", _sim_path)
-_mujoco_sim = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_mujoco_sim)
+from sim.mujoco_sim import SimMujocoModel, action2rad, _apply_pd_control, KeyboardController
 
-SimMujocoModel = _mujoco_sim.SimMujocoModel
-action2rad = _mujoco_sim.action2rad
-_apply_pd_control = _mujoco_sim._apply_pd_control
-
+def step_towards(current, target, step_size = 10) -> dict:
+    result = {}
+    for key in target.keys():
+        curr_value = current[key]
+        target_value = target[key]
+        if abs(target_value - curr_value) <= step_size:
+            result[key] = target_value
+        else:
+            if target_value > curr_value:
+                result[key] = curr_value + step_size
+            else:
+                result[key] = curr_value - step_size
+    return result   
 
 def main():
     parser = argparse.ArgumentParser(description="Leader-Follower Simulation Demo")
@@ -82,14 +100,24 @@ def main():
             "gripper": Motor(6, "xl330-m288", MotorNormMode.RANGE_0_100),
         },
     )
-
+    
     leader_arm.connect()
-
+    
     # 加载 leader 校准数据
     calibration_data = json.load(open(args.leader_calibration, "r"))
     for motor_name, calib in calibration_data.items():
         calibration_data[motor_name] = MotorCalibration(**calib)
     leader_arm.write_calibration(calibration_dict=calibration_data)
+
+    
+    # 如果键盘控制就使能
+    if KEY_BOARD:
+        kb = KeyboardController().start()
+        print("\n=== 键盘控制 ===")
+        print("上/下键: 切换关节  左/右键: 调整角度  空格: 重置  ESC: 退出\n")
+        leader_arm.enable_torque()
+
+    
 
     print("Leader 机械臂已连接")
 
@@ -112,6 +140,9 @@ def main():
     frequency = 100  # Hz
     frame_count = 0
 
+    current_joint = 0
+    prev_up = prev_down = prev_space = False
+
     try:
         while sim.viewer.is_running():
             try:
@@ -119,12 +150,58 @@ def main():
                 leader_pos = {}
                 for motor in leader_arm.motors.keys():
                     leader_pos[motor] = leader_arm.read("Present_Position", motor=motor)
+                    # 读取的原始数据 - 归一化后的
+
+                moving = False
+                if KEY_BOARD:
+                    up = kb.get('up')
+                    down = kb.get('down')
+                    space = kb.get(' ')
+
+                    # 上升沿检测：切换关节
+                    if up and not prev_up:
+                        current_joint = (current_joint - 1 + 6) % 6
+                        current_motor = joint_names[current_joint]
+                        print(f"选中关节 {current_joint} ({current_motor}): {leader_pos[current_motor]:.2f}")
+                    if down and not prev_down:
+                        current_joint = (current_joint + 1) % 6
+                        current_motor = joint_names[current_joint]
+                        print(f"选中关节 {current_joint} ({current_motor}): {leader_pos[current_motor]:.2f}")
+
+                    # 空格重置到初始位置
+                    if space and not prev_space:
+                        print("重置仿真位置")
+                        mujoco.mj_resetData(sim.model, sim.data)
+                        sim.target_joint_positions = sim.data.qpos[:sim.model.nu].copy()
+
+                    # 每次对 action 中当前关节的值进行调整
+                    current_motor = joint_names[current_joint]
+                    if kb.get('left'):
+                        leader_pos[current_motor] += STEPS
+                        moving = True
+                    if kb.get('right'):
+                        leader_pos[current_motor] -= STEPS
+                        moving = True
+
+                    prev_up = up
+                    prev_down = down
+                    prev_space = space
 
                 # 按关节顺序组装 action 列表
                 action = [leader_pos[name] for name in joint_names]
 
                 # 转换为弧度
                 rad_angles = action2rad(action, calibration_file=args.sim_calibration, use_degrees=args.use_degrees)
+
+                if KEY_BOARD and moving:
+                    # 打印当前 action 和转换后的 rad
+                    action_str = ", ".join(f"{v:.2f}" for v in action)
+                    rad_str = ", ".join(f"{v:.3f}" for v in rad_angles)
+                    print(f"action: [{action_str}]")
+                    print(f"rad:    [{rad_str}]")
+                    # 写入到电机中
+                    for motor, pos in leader_pos.items():
+                        leader_arm.write("Goal_Position", motor, pos)
 
                 # 设置仿真关节角度
                 sim.set_joint_angles(rad_angles)
@@ -134,13 +211,23 @@ def main():
                 _apply_pd_control(sim)
                 mujoco.mj_step(sim.model, sim.data)
                 sim.viewer.sync()
+                if REMOTE:
+                    # 不断发送数据，有程序来可以监听这里发送的数据并解析
+                    import socket
+                    # UDP 发送仿真关节角度
+                    if not hasattr(main, "_sock"):
+                        main._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        main._addr = (IP, PORT)
+                    # 发送内容为 json 字符串
+                    send_data = json.dumps({"rad_angles": rad_angles}).encode("utf-8")
+                    main._sock.sendto(send_data, main._addr)
 
                 frame_count += 1
-                if frame_count % 200 == 0:
-                    action_str = ", ".join(f"{v:.1f}" for v in action)
-                    rad_str = ", ".join(f"{v:.3f}" for v in rad_angles)
-                    print(f"[{frame_count}] action: [{action_str}]")
-                    print(f"         rad: [{rad_str}]")
+                # if frame_count % 200 == 0:
+                #     action_str = ", ".join(f"{v:.1f}" for v in action)
+                #     rad_str = ", ".join(f"{v:.3f}" for v in rad_angles)
+                #     print(f"[{frame_count}] action: [{action_str}]")
+                #     print(f"         rad: [{rad_str}]")
 
                 time.sleep(1 / frequency)
 

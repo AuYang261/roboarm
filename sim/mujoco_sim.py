@@ -113,7 +113,7 @@ class SimMujocoModel:
         self.viewer.cam.azimuth = 135.0
 
         self.dt = self.model.opt.timestep
-        self.position_speed = 10  # 弧度/秒
+        self.position_speed = 100  # 弧度/秒
 
         # 目标关节角度（弧度）
         self.target_joint_positions = (
@@ -287,7 +287,16 @@ def main():
 
     # 注册视角
     sim.add_view('default', {'distance': 3.0, 'lookat': [0.0, 0.0, 0.0], 'elevation': -20.0, 'azimuth': 135.0})
-    sim.add_view('top',     {'distance': 2.0, 'lookat': [0.0, 0.0, 0.0], 'elevation': -90.0, 'azimuth': 0.0})
+    
+    """
+        distance: 0.3977693502162603
+        lookat: [0.04549377 0.00060337 0.17765481]
+        elevation: -89.0
+        azimuth: 90.75984990619148
+        trackbodyid: -1
+        fixedcamid: -1
+    """
+    sim.add_view('top',     {'distance': 0.39, 'lookat': [0.04, 0.0, 0.17], 'elevation': -89.0, 'azimuth': 90.0})
     sim.switch_view('default')
 
     # 创建离屏渲染器和两个相机视角
@@ -297,10 +306,10 @@ def main():
     # Top 视角相机：俯视
     top_cam = mujoco.MjvCamera()
     top_cam.type = mujoco.mjtCamera.mjCAMERA_FREE
-    top_cam.distance = 2.0
-    top_cam.lookat[:] = [0.0, 0.0, 0.0]
-    top_cam.elevation = -90.0
-    top_cam.azimuth = 0.0
+    top_cam.distance = 0.39
+    top_cam.lookat[:] = [0.04, 0.0, 0.17]
+    top_cam.elevation = -89.0
+    top_cam.azimuth = 90.0
 
     # Follow 视角相机：跟随夹爪（使用 XML 中定义的 gripper_cam）
     follow_cam = mujoco.MjvCamera()
@@ -358,6 +367,14 @@ def main():
             mujoco.mj_resetData(sim.model, sim.data)
             sim.target_joint_positions = sim.data.qpos[:sim.model.nu].copy()
             print("位置重置")
+            cam = sim.viewer.cam
+            print("type:", cam.type)           # 枚举：mujoco.mjtCamera.mjCAMERA_FREE/TRACKING/FIXED
+            print("distance:", cam.distance)
+            print("lookat:", cam.lookat)       # 长度 3 列表
+            print("elevation:", cam.elevation)
+            print("azimuth:", cam.azimuth)
+            print("trackbodyid:", cam.trackbodyid)
+            print("fixedcamid:", cam.fixedcamid)
 
         prev_up    = up
         prev_down  = down
@@ -436,12 +453,12 @@ def prepo2rad_homing(prepo, calibration_file="calibration/koch_follower.json"):
         calibration = json.load(f)
     # 读取 homing offset
     homing_offset = [calibration[joint]["homing_offset"] for joint in ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]]
-    print(f"func homing_offset: {homing_offset}")
+    # print(f"func homing_offset: {homing_offset}")
     # 减去 homing offset
     actual = [prepo - offset for prepo, offset in zip(prepo, homing_offset)]
-    print(f"func actual: {actual}")
+    # print(f"func actual: {actual}")
     my_prepose = [actual[i] + MODEL_HOMING[i] for i in range(len(prepo))]
-    print(f"func my_prepose: {my_prepose}")
+    # print(f"func my_prepose: {my_prepose}")
     return prepo2rad_direct(my_prepose)
 
 def prepo2rad_direct(action):

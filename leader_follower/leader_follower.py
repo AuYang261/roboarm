@@ -11,7 +11,8 @@ import select
 import argparse
 import yaml
 
-
+# mujoco-sim.py 文件名含连字符，用 importlib 加载
+from sim.mujoco_sim import SimMujocoModel, action2rad, _apply_pd_control, KeyboardController
 
 def step_towards(current, target, step_size = 10) -> dict:
     result = {}
