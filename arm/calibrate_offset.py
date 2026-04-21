@@ -4,9 +4,10 @@
 #    把机械臂放到零位位置(见docs/image1.png)，然后读取各关节角度，作为offset保存下来
 #    单位度，夹爪角度不需要
 # 2. piper
-#    先通过.venv/lib/python3.10/site-packages/piper_sdk/demo/V2/piper_set_joint_zero.py脚本设置零点
-#    然后运行此脚本，显示当前的RZ,RY,RX
-#   （暂不清楚零点不同的本体，指定相同的位姿是否会有相同表现，如果是则无需运行此脚本，待测试。目前是硬编码DEFAULT_DOWN_EULER_DEG_ZYX）
+#    通过.venv/lib/python3.10/site-packages/piper_sdk/demo/V2/piper_set_joint_zero.py脚本设置统一零点
+#    要严格设置标准的零点位（J1零点校准刻度对齐为零点，J2J3当机械臂失能后自然垂下放置即为零点，J6轴线与J4共线状态下J5为零点）
+#    以保证不同的本体零点相同，指定相同的位姿会有相同表现
+#    piper机械臂下此脚本仅显示当前的x,y,z,RZ,RY,RX方便调试，非必需
 import os
 import sys
 
@@ -29,8 +30,13 @@ def main():
                 for angle_deg in list(arm.arm.get_observation().values())[:-1]:
                     print(f"  - {angle_deg:.2f}")
             elif arm_type == "piper":
-                for pose_i in arm.get_arm_pose():
-                    print(f"  - {pose_i:.2f}")
+                pos, rot = arm.get_arm_pose()
+                if pos:
+                    for pos_i in pos:
+                        print(f"  - {pos_i:.2f}")
+                if rot:
+                    for rot_i in rot:
+                        print(f"  - {rot_i:.2f}")
             else:
                 raise RuntimeError(f"Unknown arm_type {arm_type}")
         except Exception as e:

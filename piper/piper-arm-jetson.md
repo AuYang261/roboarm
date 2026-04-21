@@ -46,11 +46,8 @@ source ~/.bashrc   # 或重开终端使 uv 生效
 git clone -c http.proxy=http://192.168.0.15:7890 https://github.com/AuYang261/roboarm.git ~/roboarm
 cd ~/roboarm
 
-uv venv --python 3.8
-source .venv/bin/activate
-
-# piper_sdk + python-can 的 gs_usb 支持
-uv pip install piper_sdk "python-can[gs_usb]" pyusb
+# 一键同步python环境
+uv sync
 
 # 验证 piper_sdk 安装
 uv run python -c "from piper_sdk import C_PiperInterface_V2; print('piper_sdk OK')"

@@ -23,10 +23,8 @@ class PiperBySDK(Arm):
 
     FACTOR = 1000.0
     JOINT_COUNT = 6
-    # 默认末端朝前的欧拉角 [RZ, RY, RX]（度）
-    DEFAULT_EULER_DEG_ZYX = [0.0, 60.0, 0.0]
     # 默认末端朝下的欧拉角 [RZ, RY, RX]（度）
-    DEFAULT_DOWN_EULER_DEG_ZYX = [0.0, 150.0, 0.0]
+    DEFAULT_DOWN_EULER_DEG_ZYX = [0.0, 180.0, 0.0]
     MAX_GRIPPER_ANGLE_DEG = 100
 
     def __init__(self, move_mode_end_pose: bool = True, debug_mode: bool = True):
@@ -100,7 +98,7 @@ class PiperBySDK(Arm):
             while True:
                 status = self.piper.GetArmStatus()
                 if status.arm_status.motion_status == 0x00:
-                    print(self.arm_status2str(status.arm_status))
+                    print(self.arm_status2str(status.arm_status.motion_status))
                     self.piper.JointConfig(clear_err=0xAE)
                     break
                 if time.time() - start > self.timeout:
@@ -153,7 +151,7 @@ class PiperBySDK(Arm):
         while True:
             status = self.piper.GetArmStatus()
             if status.arm_status.motion_status == 0x00:
-                print(self.arm_status2str(status.arm_status))
+                print(self.arm_status2str(status.arm_status.motion_status))
                 self.piper.JointConfig(clear_err=0xAE)
                 break
             if time.time() - start > self.timeout:
