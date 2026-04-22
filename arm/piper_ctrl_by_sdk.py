@@ -101,9 +101,10 @@ class PiperBySDK(Arm):
             while True:
                 status = self.piper.GetArmStatus()
                 if status.arm_status.motion_status == 0x00:
-                    print(self.arm_status2str(status.arm_status.motion_status))
-                    self.piper.JointConfig(clear_err=0xAE)
                     break
+                else:
+                    print(self.arm_status2str(status.arm_status.motion_status))
+                    # self.piper.JointConfig(clear_err=0xAE)
                 if time.time() - start > self.timeout:
                     print("set_arm_angles 超时")
                     break
@@ -146,19 +147,23 @@ class PiperBySDK(Arm):
         except Exception:
             return None, None
 
-    def move_to_home(self, gripper_open_0to1: float | None = None) -> bool:
+    def move_to_home(
+        self, gripper_open_0to1: float | None = None, safe_pos: bool = False
+    ) -> bool:
+        """safe_pos表示是否要移动到可安全失能的位置"""
         if self.move_mode_end_pose:
             self.set_move_mode(move_mode_end_pose=False)
 
-        self.piper.JointCtrl(0, 0, 0, 0, 0, 0)
+        self.piper.JointCtrl(0, 0, 0, 0, int(25 * self.FACTOR) if safe_pos else 0, 0)
         start = time.time()
         flag = True
         while True:
             status = self.piper.GetArmStatus()
             if status.arm_status.motion_status == 0x00:
-                print(self.arm_status2str(status.arm_status.motion_status))
-                self.piper.JointConfig(clear_err=0xAE)
                 break
+            else:
+                print(self.arm_status2str(status.arm_status.motion_status))
+                # self.piper.JointConfig(clear_err=0xAE)
             if time.time() - start > self.timeout:
                 print("move_to_home 超时")
                 flag = False
@@ -213,6 +218,9 @@ class PiperBySDK(Arm):
             self.reset()
         except TimeoutError as e:
             print(f"Error during reset: {e}")
+        # 移动到可安全失能的位置
+        self.move_to_home(safe_pos=True)
+        time.sleep(0.5)
         self.disable_torque()
         self.piper.DisconnectPort()
         print("Arm disconnected")
@@ -332,7 +340,7 @@ class PiperBySDK(Arm):
             status = self.piper.GetArmStatus().arm_status
             if status.arm_status != 0x0:
                 print(self.arm_status2str(status.arm_status))
-                self.piper.JointConfig(clear_err=0xAE)
+                # self.piper.JointConfig(clear_err=0xAE)
                 return False
             if status.motion_status == 0x00:
                 return True
@@ -498,9 +506,8 @@ if __name__ == "__main__":
     print("关节角度:", arm.get_arm_angles())
     print("末端位置:", np.array(arm.get_arm_pose()).round(2).tolist())
 
-    arm.catch_and_place(0.2, 0.0, -np.pi / 6 * 0, [0, 0.2])
+    arm.catch_and_place(0.2, 0.0, -np.pi / 6 * 0, [0.2, 0.2])
     time.sleep(1)
     arm.move_to_home(gripper_open_0to1=1)
-    time.sleep(1)
 
     arm.disconnect_arm()
