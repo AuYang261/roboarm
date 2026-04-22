@@ -46,9 +46,12 @@ class PiperBySDK(Arm):
         except:
             can_ports = self.activate_can()
             if config_can_port not in can_ports:
-                raise RuntimeError(
-                    f"arm port {config_can_port} in config not in scanned port({can_ports})"
+                print(
+                    f"Warning: arm port {config_can_port} in config is not in scanned port({can_ports})"
                 )
+                if len(can_ports) == 1:
+                    print(f"Using {can_ports[0]} instead")
+                    config_can_port = can_ports[0]
             self.piper = C_PiperInterface_V2(config_can_port)
             self.piper.ConnectPort()
         self.piper.JointConfig(clear_err=0xAE)
@@ -133,7 +136,9 @@ class PiperBySDK(Arm):
             joints.joint_state.joint_6 / self.FACTOR,
         ]
         gripper_0to1 = gripper_msgs.gripper_state.grippers_angle / self.FACTOR
-        return angles_deg, np.clip(gripper_0to1 / self.MAX_GRIPPER_ANGLE_DEG, 0, 1)
+        return angles_deg, float(
+            np.clip(gripper_0to1 / self.MAX_GRIPPER_ANGLE_DEG, 0, 1).round(2)
+        )
 
     def get_arm_pose(self) -> tuple[list[float] | None, list[float] | None]:
         try:
@@ -483,7 +488,7 @@ if __name__ == "__main__":
     print("关节角度:", arm.get_arm_angles())
     print("末端位姿:", np.array(arm.get_arm_pose()).round(2).tolist())
 
-    arm.move_to([0.2, 0.2, 0.2], gripper_open_0to1=0, rot_rad=np.pi / 6 * 0)
+    arm.move_to([0.2, 0.2, 0.2], gripper_open_0to1=0, rot_rad=np.pi / 6)
     time.sleep(2)
     print("关节角度:", arm.get_arm_angles())
     print("末端位置:", np.array(arm.get_arm_pose()).round(2).tolist())
@@ -493,7 +498,7 @@ if __name__ == "__main__":
     print("关节角度:", arm.get_arm_angles())
     print("末端位置:", np.array(arm.get_arm_pose()).round(2).tolist())
 
-    arm.catch_and_place(0.2, 0.0, -np.pi * 6, [0, 0.2])
+    arm.catch_and_place(0.2, 0.0, -np.pi / 6 * 0, [0, 0.2])
     time.sleep(1)
     arm.move_to_home(gripper_open_0to1=1)
     time.sleep(1)
