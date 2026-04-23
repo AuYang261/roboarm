@@ -3,7 +3,7 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import cv2
-import yaml
+from config_getter import get_config_value
 
 
 class Camera:
@@ -13,14 +13,8 @@ class Camera:
         color: bool = True,
         depth: bool = False,
     ):
-        config = yaml.safe_load(
-            open(
-                os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml"),
-                encoding="utf-8",
-            )
-        )
-        self.ip = config.get("camera_ip", "")
-        self.port = config.get("camera_port", None)
+        self.ip = get_config_value("camera_ip", "", False)
+        self.port = get_config_value("camera_port", None, False)
         self.color = color
         self.depth = depth
         self.pipeline = None

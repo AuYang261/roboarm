@@ -161,9 +161,9 @@ class PiperBySDK(Arm):
             status = self.piper.GetArmStatus()
             if status.arm_status.motion_status == 0x00:
                 break
-            else:
-                print(self.arm_status2str(status.arm_status.motion_status))
-                # self.piper.JointConfig(clear_err=0xAE)
+            # else:
+            #     print(self.arm_status2str(status.arm_status.motion_status))
+            #     self.piper.JointConfig(clear_err=0xAE)
             if time.time() - start > self.timeout:
                 print("move_to_home 超时")
                 flag = False
@@ -219,6 +219,7 @@ class PiperBySDK(Arm):
         except TimeoutError as e:
             print(f"Error during reset: {e}")
         # 移动到可安全失能的位置
+        print("Move piper arm to safe state.")
         self.move_to_home(safe_pos=True)
         time.sleep(0.5)
         self.disable_torque()
@@ -319,6 +320,12 @@ class PiperBySDK(Arm):
         """
         if self.move_mode_end_pose is False:
             raise RuntimeError("Cannot set end-effector pose in joint control mode.")
+        if len(position) != 3:
+            raise ValueError(f"Length of param 'position({position})' must be 3")
+        if len(euler_angles_deg_zyx) != 3:
+            raise ValueError(
+                f"Length of param 'euler_angles_deg_zyx({euler_angles_deg_zyx})' must be 3"
+            )
         position_scaled = np.array(position) * self.FACTOR * 1000.0
         euler_scaled = (
             R.from_euler("zyx", np.array(euler_angles_deg_zyx), degrees=True).as_euler(

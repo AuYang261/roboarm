@@ -65,11 +65,7 @@ class Arm:
             "default_gripper_close_threshold"
         )
         self.catch_time_interval_s = get_config_value("catch_time_interval_s")
-        self.get_arm_angles_retry_times = get_config_value(
-            "get_arm_angles_retry_times"
-        )
-        self.catch_times = 0
-        self.uncatch_times = 0
+        self.get_arm_angles_retry_times = get_config_value("get_arm_angles_retry_times")
         if os.path.exists(hand_eye_calibration_file):
             self.hand_eye_calibration_matrix = np.load(hand_eye_calibration_file)
 
@@ -189,7 +185,6 @@ class Arm:
         Returns:
             抓取是否成功。
         """
-        self.catch_times += 1
         target_z = self.desktop_height if height == inf else height
 
         res = self.move_to(
@@ -201,7 +196,7 @@ class Arm:
             print("移动到目标位置失败，取消抓取")
             self.move_to_home(gripper_open_0to1=1)
             return False
-        time.sleep(self.catch_time_interval_s)
+        time.sleep(self.catch_time_interval_s * 2)
 
         res = self.move_to(
             [target_x, target_y, target_z],
@@ -240,10 +235,8 @@ class Arm:
             or current_gripper_open_0to1 < self.default_gripper_close_threshold
         ):
             print("夹取失败")
-            self.uncatch_times += 1
             self.move_to_home(gripper_open_0to1=1)
             return False
-        time.sleep(self.catch_time_interval_s)
         return True
 
     def place(
@@ -273,7 +266,7 @@ class Arm:
             print("移动到目标位置失败，取消放置")
             self.move_to_home(gripper_open_0to1=1)
             return False
-        time.sleep(self.catch_time_interval_s)
+        time.sleep(self.catch_time_interval_s * 2)
 
         self.set_gripper(gripper_open_0to1=1)
         time.sleep(self.catch_time_interval_s)
@@ -312,7 +305,7 @@ class Arm:
         if not self.catch(target_x, target_y, catch_rotate_rad, height=height):
             self.move_to_home(gripper_open_0to1=1)
             return False
-        self.move_to_home()
+        # self.move_to_home()
         if not self.place(place_x, place_y, place_z, place_rotate_rad):
             self.move_to_home(gripper_open_0to1=1)
             return False

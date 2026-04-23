@@ -77,7 +77,7 @@ APIKey:
 
 # 以项目根目录为基准
 classification_YOLO_model_path:
-  - classification\object_detect\runs\积木方块\best.pt
+  - object_detect/runs/积木方块/best.pt
 
 # 默认YOLO识别置信度阈值
 default_conf_thres: 0.85
