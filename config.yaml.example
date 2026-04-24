@@ -36,8 +36,8 @@ default_gripper_aside_pos:
 # llm_base_url: https://api.ohmygpt.com/v1
 llm_base_url: http://192.168.0.19:8001/v1
 
-# 大模型平台的api_key，本地部署则不需要
-llm_api_key: ****
+# 大模型平台的api_key，本地部署则随便填，但不要为空
+llm_api_key: any
 
 # 提示词文件
 prompts_file: prompts.toml

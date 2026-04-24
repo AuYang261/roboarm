@@ -211,7 +211,7 @@ class LLMAPI:
             except Exception as e:
                 print(f"Error in task: {e}")
                 return None, True
-            print(f"Await time taken: {time.time() - start_time} seconds")
+            print(f"Await time taken: {time.time() - start_time:.2f} seconds")
         else:
             if not task.done():
                 return None, False
@@ -224,7 +224,7 @@ class LLMAPI:
                 finally:
                     if task in self._start_times:
                         print(
-                            f"Total time taken: {time.time() - self._start_times[task]} seconds"
+                            f"Total time taken: {time.time() - self._start_times[task]:.2f} seconds"
                         )
                         del self._start_times[task]
         if completion.choices is None or len(completion.choices) == 0:
