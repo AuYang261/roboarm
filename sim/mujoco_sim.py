@@ -13,6 +13,7 @@ from threading import Lock
 import json
 import math
 import time
+import cv2
 
 MODEL_HOMING = [27, 1094, 126, 994, 62, 79] # 对应 xml 模型 urdf\meshes\mjmodel.xml
     
@@ -93,7 +94,8 @@ class KeyboardController:
 
 class SimMujocoModel:
     """MuJoCo机械臂仿真器，封装了仿真循环、控制、视角和稳定模式"""
-
+    import mujoco
+    import mujoco.viewer
     # 初始化
     def __init__(self, urdf_path):
         self.model = mujoco.MjModel.from_xml_path(urdf_path)
@@ -111,7 +113,7 @@ class SimMujocoModel:
         self.viewer.cam.azimuth = 135.0
 
         self.dt = self.model.opt.timestep
-        self.position_speed = 5  # 弧度/秒
+        self.position_speed = 10  # 弧度/秒
 
         # 目标关节角度（弧度）
         self.target_joint_positions = (
@@ -124,6 +126,12 @@ class SimMujocoModel:
         self.kp = 15.0
         self.kd = 1.0
         self.stability_mode = False
+
+        # 缓存末端 body ID
+        self._last_joint_body_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_BODY, "gripper_static_1")
+        self._gripper_body_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_BODY, "gripper_moving_1")
 
         # 视角字典 {name: {distance, lookat, elevation, azimuth, follow_body?}}
         self.views = {}
@@ -206,6 +214,62 @@ class SimMujocoModel:
         self.kd = 2.0 if enable else 1.0
         print(f"稳定模式: {'启用' if enable else '关闭'}")
 
+    def joint_angles_to_poses(self, joint_angles):
+        """
+        正运动学：根据关节角度计算末端位姿。
+
+        Parameters
+        ----------
+        joint_angles : list[float]
+            各关节角度（弧度），长度应与 model.nq 一致。
+
+        Returns
+        -------
+        dict
+            {
+                'last_joint': {'pos': np.ndarray(3), 'quat': np.ndarray(4)},
+                'gripper':    {'pos': np.ndarray(3), 'quat': np.ndarray(4)},
+            }
+            last_joint — gripper_static_1（最后一个机械臂关节 joint5 所在连杆）
+            gripper    — gripper_moving_1（实际工作点）
+            quat 为 MuJoCo 格式 [w, x, y, z]
+        """
+        tmp_data = mujoco.MjData(self.model)
+        n = min(len(joint_angles), self.model.nq)
+        for i in range(n):
+            tmp_data.qpos[i] = joint_angles[i]
+        mujoco.mj_forward(self.model, tmp_data)
+
+        return {
+            'last_joint': {
+                'pos':  tmp_data.xpos[self._last_joint_body_id].copy(),
+                'quat': tmp_data.xquat[self._last_joint_body_id].copy(),
+            },
+            'gripper': {
+                'pos':  tmp_data.xpos[self._gripper_body_id].copy(),
+                'quat': tmp_data.xquat[self._gripper_body_id].copy(),
+            },
+        }
+
+    def get_current_poses(self):
+        """
+        从当前仿真状态直接读取末端位姿（无需额外计算）。
+
+        Returns
+        -------
+        dict  （格式同 joint_angles_to_poses）
+        """
+        return {
+            'last_joint': {
+                'pos':  self.data.xpos[self._last_joint_body_id].copy(),
+                'quat': self.data.xquat[self._last_joint_body_id].copy(),
+            },
+            'gripper': {
+                'pos':  self.data.xpos[self._gripper_body_id].copy(),
+                'quat': self.data.xquat[self._gripper_body_id].copy(),
+            },
+        }
+
     def close(self):
         if hasattr(self, 'viewer') and self.viewer.is_running():
             self.viewer.close()
@@ -218,13 +282,31 @@ def _apply_pd_control(sim):
 
 def main():
     """主函数，创建仿真模型并运行"""
-    model_path = 'urdf/meshes/mjmodel.xml'
+    model_path = 'urdf/meshes/mjmodel_opt.xml'
     sim = SimMujocoModel(model_path)
 
     # 注册视角
     sim.add_view('default', {'distance': 3.0, 'lookat': [0.0, 0.0, 0.0], 'elevation': -20.0, 'azimuth': 135.0})
     sim.add_view('top',     {'distance': 2.0, 'lookat': [0.0, 0.0, 0.0], 'elevation': -90.0, 'azimuth': 0.0})
     sim.switch_view('default')
+
+    # 创建离屏渲染器和两个相机视角
+    render_w, render_h = 640, 480
+    renderer = mujoco.Renderer(sim.model, height=render_h, width=render_w)
+
+    # Top 视角相机：俯视
+    top_cam = mujoco.MjvCamera()
+    top_cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+    top_cam.distance = 2.0
+    top_cam.lookat[:] = [0.0, 0.0, 0.0]
+    top_cam.elevation = -90.0
+    top_cam.azimuth = 0.0
+
+    # Follow 视角相机：跟随夹爪（使用 XML 中定义的 gripper_cam）
+    follow_cam = mujoco.MjvCamera()
+    follow_cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+    follow_cam.fixedcamid = mujoco.mj_name2id(
+        sim.model, mujoco.mjtObj.mjOBJ_CAMERA, "gripper_cam")
 
     kb = KeyboardController().start()
     print("\n=== 键盘控制 ===")
@@ -251,15 +333,25 @@ def main():
             print(f"选中关节 {current_joint}: {sim.target_joint_positions[current_joint]:.3f} rad")
 
         # 持续控制选中关节角度
+        moving = False
         if sim.model.nu > 0:
             if kb.get('left'):
                 sim.target_joint_positions[current_joint] = np.clip(
                     sim.target_joint_positions[current_joint] + sim.position_speed * sim.dt,
                     -3.14159, 3.14159)
+                moving = True
             if kb.get('right'):
                 sim.target_joint_positions[current_joint] = np.clip(
                     sim.target_joint_positions[current_joint] - sim.position_speed * sim.dt,
                     -3.14159, 3.14159)
+                moving = True
+
+        if moving:
+            poses = sim.get_current_poses()
+            lj = poses['last_joint']
+            gr = poses['gripper']
+            print(f"[last_joint ] pos={np.array2string(lj['pos'], precision=4, suppress_small=True)}  quat={np.array2string(lj['quat'], precision=4, suppress_small=True)}")
+            print(f"[gripper    ] pos={np.array2string(gr['pos'], precision=4, suppress_small=True)}  quat={np.array2string(gr['quat'], precision=4, suppress_small=True)}")
 
         # 空格重置
         if space and not prev_space:
@@ -275,9 +367,24 @@ def main():
         _apply_pd_control(sim)
         mujoco.mj_step(sim.model, sim.data)
         sim.viewer.sync()
+
+        # 离屏渲染两个视角并用 OpenCV 显示
+        renderer.update_scene(sim.data, top_cam)
+        top_img = renderer.render()
+        cv2.imshow("Top View", cv2.cvtColor(top_img, cv2.COLOR_RGB2BGR))
+
+        renderer.update_scene(sim.data, follow_cam)
+        follow_img = renderer.render()
+        cv2.imshow("Follow View", cv2.cvtColor(follow_img, cv2.COLOR_RGB2BGR))
+
+        if cv2.waitKey(1) & 0xFF == 27:  # ESC 退出
+            break
+
         time.sleep(sim.dt * 0.5)
 
     kb.stop()
+    renderer.close()
+    cv2.destroyAllWindows()
     sim.close()
 
 """
@@ -336,7 +443,6 @@ def prepo2rad_homing(prepo, calibration_file="calibration/koch_follower.json"):
     my_prepose = [actual[i] + MODEL_HOMING[i] for i in range(len(prepo))]
     print(f"func my_prepose: {my_prepose}")
     return prepo2rad_direct(my_prepose)
-    
 
 def prepo2rad_direct(action):
     """
@@ -500,29 +606,6 @@ def action2rad(action, calibration_file="calibration/koch_follower.json", use_de
     rad = prepo2rad_homing(prepo, calibration_file=calibration_file)
     return rad
 
-# action 2 rad
-# def action2rad_direct(action):
-#     """
-#     将action转换为弧度
-#     action: list of floats
-#         关节范围[-100, 100]
-#         夹爪范围[0, 100] # 100 是开
-#     rad: list of floats
-#         关节: [-π, π]
-#         夹爪: [0, -1.3962634]
-#     """
-#     import numpy as np
-#     import math
-#     action = np.array(action, dtype=np.float64)
-#     num_joints = len(action) - 1  # 最后一个是夹爪
-#     rad = np.zeros_like(action)
-#     # action 是归一化值
-#     # 关节: [-100, 100] -> [-π, π]
-#     rad[:num_joints] = action[:num_joints] / 100.0 * math.pi
-#     # 夹爪: [0, 100] -> [0, -1.3962634]  (即 [0°, -80°])
-#     rad[num_joints] = -action[num_joints] / 100.0 * 1.3962634
-#     return rad.tolist()
-
 def replay():
     """回放函数，加载之前保存的仿真数据并回放"""
     # jsonl_file = 'sim/VLA_action.jsonl'
@@ -565,7 +648,7 @@ def replay():
     sim = SimMujocoModel(model_path)
     sim.add_view('default', {'distance': 3.0, 'lookat': [0.0, 0.0, 0.0], 'elevation': -20.0, 'azimuth': 135.0})
     sim.add_view('top',     {'distance': 2.0, 'lookat': [0.0, 0.0, 0.0], 'elevation': -90.0, 'azimuth': 0.0})
-    sim.add_view('follow',  {'fixed_camera': 'arm_cam'})
+    sim.add_view('follow',  {'fixed_camera': 'gripper_cam'})
 
     # 选择视角
     print("\n=== 选择回放视角 ===")
@@ -654,60 +737,6 @@ def replay():
 
     kb.stop()
     sim.close()
-
-# present position to rad
-# def prepo2rad(action, calibration_file="calibration/koch_follower.json"):
-#     """
-#     将原始位置信号（present position）转换为弧度
-#     Parameters:
-#     -----------
-#     action: list of floats
-#         原始位置信号，对应各个关节和夹爪的原始值
-#     calibration_file: str
-#         校准文件路径
-#     Returns:
-#     --------
-#     list of floats
-#         弧度值，关节: [-π, π]，夹爪: [-1.3962634, 0]
-#     """
-#     import json
-#     import numpy as np
-#     import math
-#     import os
-#     # 加载校准数据
-#     if not os.path.exists(calibration_file):
-#         calibration_file = os.path.join(os.path.dirname(__file__), '..', calibration_file)
-#     with open(calibration_file, 'r') as f:
-#         calibration = json.load(f)
-#     # 关节顺序（根据校准文件）
-#     joint_names = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
-#     action = np.array(action, dtype=np.float64)
-#     rad = np.zeros_like(action)
-#     # 前5个是关节，最后一个是夹爪
-#     for i, joint_name in enumerate(joint_names):
-#         if joint_name in calibration:
-#             calib = calibration[joint_name]
-#             range_min = calib["range_min"]
-#             range_max = calib["range_max"]
-#             # 限制在有效范围内
-#             val = np.clip(action[i], range_min, range_max)
-#             if joint_name == "gripper":
-#                 # 夹爪: [range_min, range_max] -> [180°, 260°] -> [-80°, 0°] -> [-1.3962634, 0] rad
-#                 # 先映射到 [180, 260] 度
-#                 degrees = 180 + (val - range_min) / (range_max - range_min) * 80
-#                 # 转换为 [-80, 0] 度
-#                 degrees = degrees - 260
-#                 # 转为弧度
-#                 rad[i] = degrees * (math.pi / 180.0)
-#             else:
-#                 # 关节: [range_min, range_max] -> [0, 360] 度 -> [-180, 180] 度 -> [-π, π] rad
-#                 # 先映射到 [0, 360] 度
-#                 degrees = (val - range_min) / (range_max - range_min) * 360
-#                 # 转换为 [-180, 180] 度
-#                 degrees = (degrees + 180) % 360 - 180
-#                 # 转为弧度
-#                 rad[i] = degrees * (math.pi / 180.0)
-#     return rad.tolist()
 
 def show(pose_type, pose, use_degrees=False, calibration_file="calibration\\koch_follower.json", model_path='urdf/meshes/mjmodel.xml', duration=60):
     """
@@ -917,6 +946,6 @@ def test():
     # print("--------------------------------")
 
 if __name__ == "__main__":
-    # main()
-    replay()
+    main()
+    # replay()
     # test()

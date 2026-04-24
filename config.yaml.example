@@ -42,7 +42,7 @@ llm_api_key: any
 # 提示词文件
 prompts_file: prompts.toml
 
-# 代理地址，如请求大模型失败可设置或取消代理
+# 代理地址，如请求大模型失败可设置或取消代理，注意若本地代理开了TUN模式，这里不设置代理可能会请求不到
 https_proxy: 
 
 # 使用的大模型名称，见https://openrouter.ai/models 或 https://www.ohmygpt.com/models，必须是支持多模态输入的模型

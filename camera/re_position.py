@@ -48,7 +48,7 @@ def load_model(model_path, device=""):
     return model
 
 def main():
-    ARM_POS = True
+    ARM_POS = False
     YOLO_MODEL = False
     
     arm = Arm()
@@ -188,9 +188,9 @@ def main():
         #======================================================================
         # part4 在原始图像上绘制多边形
         # 原始图像上绘制多边形1
-        cv2.polylines(org_frame, [pts], isClosed=True, color=(0, 0, 255), thickness=2)
+        # cv2.polylines(org_frame, [pts], isClosed=True, color=(0, 0, 255), thickness=2)
         # 原始图像上绘制多边形2
-        cv2.polylines(org_frame, [pts2], isClosed=True, color=(0, 255, 0), thickness=2)
+        # cv2.polylines(org_frame, [pts2], isClosed=True, color=(0, 255, 0), thickness=2)
         # 原始图像上绘制轮廓
         cv2.imshow('Arm Camera Contours', org_frame)
         
@@ -198,6 +198,9 @@ def main():
         def get_point(event, x, y, flags, param):
             if event == cv2.EVENT_LBUTTONDOWN:
                 print(f"Point coordinates: ({x}, {y})")
+                # 保存 图像
+                cv2.imwrite("selected_point.jpg", org_frame)
+                
         cv2.setMouseCallback('Arm Camera Contours', get_point)
         
         #======================================================================
