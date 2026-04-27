@@ -247,9 +247,8 @@ def catch_by_text_instruction():
         if not thread.is_alive():
             break
     cam.close()
-    exit(0)
 
 
 if __name__ == "__main__":
-    # catch_by_text_instruction()
-    catch_by_audio()
+    catch_by_text_instruction()
+    # catch_by_audio()

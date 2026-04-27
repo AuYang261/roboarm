@@ -2,14 +2,14 @@
 
 ## Context
 
-目标：在远程主机 `hyl@192.168.0.192`（仅连接 Piper 机械臂）上克隆本仓库，用 uv 管理 Python 环境，安装 piper_sdk，先完成 CAN 连通性检查，再编写测试脚本，使机械臂执行一次关节运动。
+目标：在远程主机 `username@ip`（仅连接 Piper 机械臂）上克隆本仓库，用 uv 管理 Python 环境，安装 piper_sdk，先完成 CAN 连通性检查，再编写测试脚本，使机械臂执行一次关节运动。
 
 ---
 
 ## Step 1：SSH 登录远程主机，检查硬件与驱动基线
 
 ```bash
-ssh hyl@192.168.0.192
+ssh username@ip
 
 # 先看系统是否已经识别到 CAN 网络接口
 ip link show | grep can
@@ -43,7 +43,7 @@ source ~/.bashrc   # 或重开终端使 uv 生效
 ## Step 3：克隆仓库并初始化 uv 环境
 
 ```bash
-git clone -c http.proxy=http://192.168.0.15:7890 https://github.com/AuYang261/roboarm.git ~/roboarm
+git clone https://github.com/AuYang261/roboarm.git ~/roboarm
 cd ~/roboarm
 
 # 一键同步python环境
@@ -53,11 +53,13 @@ uv sync
 uv run python -c "from piper_sdk import C_PiperInterface_V2; print('piper_sdk OK')"
 ```
 
-如果无法 clone，http/https 可尝试使用代理 `http://192.168.0.22:7890`。
+如果无法 clone，http/https 可尝试使用代理。
 
 ---
 
 ## Step 4：识别真实 CAN 接口，并激活它
+
+*这一步只是为了观察can接口，真正控制机械臂时不是必须的，都封装在 `arm/piper_ctrl_by_sdk.py` 中了*
 
 先定位 piper_sdk 安装目录，再用 SDK 自带脚本找出“接口名 + USB 硬件地址”的真实映射：
 
@@ -90,7 +92,7 @@ Interface can_piper is connected to USB port 1-4.2:1.0
 
 注意：上面只是示例。**你必须使用自己机器上 `find_all_can_port.sh` 的真实输出，不要手填或猜测。**
 
-### 方法 A：用 SDK 自带脚本激活
+### 激活方法 A：用 SDK 自带脚本激活
 
 ```bash
 CAN_IF="can_piper"      # 示例；如果实际显示为 can0/can4，就填真实名字
@@ -100,7 +102,7 @@ sudo ip link set "$CAN_IF" down 2>/dev/null || true
 bash "$SDK_DIR/can_activate.sh" "$CAN_IF" 1000000 "$USB_ADDR"
 ```
 
-### 方法 B：手动激活
+### 激活方法 B：手动激活
 
 ```bash
 CAN_IF="can_piper"      # 示例；改成真实接口名
@@ -122,88 +124,32 @@ ip -details link show "$CAN_IF"
 
 ## Step 5：先做只读连通性测试
 
-在远程创建只读测试脚本 `~/roboarm/test/piper_test_read.py`：
-
-```python
-#!/usr/bin/env python3
-"""最小连通性测试：只读取 Piper 状态，不发送运动指令。"""
-import time
-from piper_sdk import C_PiperInterface_V2
-
-can_name = "can_piper"  # 改成 Step 4 确认的真实接口名，如 can0 / can4 / can_piper
-
-piper = C_PiperInterface_V2(can_name)
-piper.ConnectPort()
-time.sleep(0.1)
-
-print(f"使用 CAN 接口: {can_name}")
-print(piper.GetArmJointMsgs())
-print(piper.GetArmGripperMsgs())
-```
+复制 `config.yaml.example` 为 `config.yaml`，将其中的 `arm_type` 改为 `piper`。其他配置按需修改。
 
 运行：
 
 ```bash
-uv run python test/piper_test_read.py
+uv run python arm/calibrate_offset.py
 ```
 
 如果这一步都读不到状态，先不要发送运动指令，优先处理文末故障排查中的 CAN/驱动问题。
 
 ---
 
-## Step 6：创建运动测试脚本
+## Step 6：运动测试脚本
 
-在远程创建测试脚本 `~/roboarm/test/piper_test_move.py` 并尝试运行：
-
-```python
-#!/usr/bin/env python3
-"""最小测试：使能 Piper 机械臂，执行一次关节运动后回零。"""
-import time
-from piper_sdk import C_PiperInterface_V2
-
-can_name = "can_piper"  # 改成 Step 4 确认的真实接口名，如 can0 / can4 / can_piper
-piper = C_PiperInterface_V2(can_name)
-piper.ConnectPort()
-time.sleep(0.1)
-
-print(f"正在使用接口 {can_name} 使能机械臂...")
-while not piper.EnablePiper():
-    time.sleep(0.01)
-print("使能成功")
-
-factor = 57295.7795  # 1000 * 180 / pi
-
-# 移动到偏移姿态（弧度值）
-pos = [0.2, 0.2, -0.2, 0.3, -0.2, 0.5]
-joints = [round(p * factor) for p in pos]
-piper.MotionCtrl_2(0x01, 0x01, 30, 0x00)  # 速度 30%
-piper.JointCtrl(*joints)
-print(f"关节指令已发送: {joints}")
-time.sleep(3)
-
-# 回零
-piper.JointCtrl(0, 0, 0, 0, 0, 0)
-print("回零完成")
-time.sleep(2)
-```
-
----
-
-## Step 7：在远程主机运行测试
+运行：
 
 ```bash
-uv run python test/piper_test_move.py
+uv run python arm/piper_ctrl_by_sdk.py
 ```
 
 ---
 
 ## 验证标准
 
-- `uv run python test/piper_test_read.py` 能正常打印关节/夹爪状态
-- `EnablePiper()` 成功，打印“使能成功”
+- `uv run python arm/piper_ctrl_by_sdk.py` 能正常打印“使能成功”和末端位姿
 - 机械臂可见地移动到偏移姿态后回零
-- `ip -details link show <实际接口名>` 显示接口处于 `UP`
-- 无明显 CAN 报错（`dmesg | tail -20 | grep -i can`）
 
 ---
 
@@ -354,7 +300,7 @@ sudo ip link set "$CAN_IF" up
 恢复后，建议先重新执行只读脚本：
 
 ```bash
-uv run python test/piper_test_read.py
+uv run python arm/calibrate_offset.py
 ```
 
 确认收发恢复正常，再执行运动脚本。
@@ -366,5 +312,5 @@ uv run python test/piper_test_read.py
 推荐排查顺序：
 1. 先确认 `gs_usb` 已加载
 2. 再用 `find_all_can_port.sh` 确认真实接口名与 USB 地址
-3. 先跑 `piper_test_read.py` 验证连通性
-4. 最后再跑 `piper_test_move.py` 发送运动指令
+3. 先跑 `arm/calibrate_offset.py` 验证连通性
+4. 最后再跑 `arm/piper_ctrl_by_sdk.py` 发送运动指令

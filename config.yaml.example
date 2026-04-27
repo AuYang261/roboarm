@@ -14,7 +14,7 @@ arm_type: lerobo
 camera_ip: 
 camera_port: 8083
 
-# 默认桌面高度，即在机械臂坐标系下桌面的z坐标，单位米
+# 默认桌面高度，即在机械臂坐标系下桌面的z坐标，通常是实测出来的，单位米
 default_desktop_height: 0.075
 
 # 抓取动作间的停顿时间，单位秒
