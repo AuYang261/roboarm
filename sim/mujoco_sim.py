@@ -94,10 +94,10 @@ class KeyboardController:
 
 class SimMujocoModel:
     """MuJoCo机械臂仿真器，封装了仿真循环、控制、视角和稳定模式"""
-    import mujoco
-    import mujoco.viewer
     # 初始化
     def __init__(self, urdf_path):
+        self.urdf_path = os.path.abspath(urdf_path)
+        self._added_objs = []
         self.model = mujoco.MjModel.from_xml_path(urdf_path)
         self.data = mujoco.MjData(self.model)
         # 加载 "home" keyframe，将所有关节和控制器初始化为 0
@@ -273,6 +273,91 @@ class SimMujocoModel:
     def close(self):
         if hasattr(self, 'viewer') and self.viewer.is_running():
             self.viewer.close()
+
+    def add_obj(self, obj_xml_path=None, pos=None):
+        """在当前场景中动态添加一个物体，默认加载 urdf/meshes/cube.xml"""
+        if obj_xml_path is None:
+            obj_xml_path = os.path.join(os.path.dirname(self.urdf_path), "cube.xml")
+        if pos is None:
+            #TODO 从 xml 中读
+            pos = [-0.2, 0.0, 0.05]
+
+        import xml.etree.ElementTree as ET
+
+        main_tree = ET.parse(self.urdf_path)
+        main_root = main_tree.getroot()
+        main_wb = main_root.find("worldbody")
+
+        obj_tree = ET.parse(obj_xml_path)
+        obj_wb = obj_tree.getroot().find("worldbody")
+
+        obj_count = len(self._added_objs)
+        for body in list(obj_wb):
+            orig_name = body.get("name", "obj")
+            suffix = f"_{obj_count}"
+            body.set("name", orig_name + suffix)
+            body.set("pos", f"{pos[0]} {pos[1]} {pos[2]}")
+            for child in body.iter():
+                if child.get("name"):
+                    child.set("name", child.get("name") + suffix)
+            main_wb.append(body)
+
+        tmp_path = self.urdf_path + ".tmp.xml"
+        main_tree.write(tmp_path, xml_declaration=False)
+
+        saved_qpos = self.data.qpos.copy()
+        saved_qvel = self.data.qvel.copy()
+        saved_ctrl = self.data.ctrl.copy()
+        self.model = mujoco.MjModel.from_xml_path(tmp_path)
+        self.data = mujoco.MjData(self.model)
+        os.remove(tmp_path)
+
+        n = min(len(saved_qpos), self.model.nq)
+        self.data.qpos[:n] = saved_qpos[:n]
+        self.data.qvel[:min(len(saved_qvel), self.model.nv)] = saved_qvel[:min(len(saved_qvel), self.model.nv)]
+        self.data.ctrl[:min(len(saved_ctrl), self.model.nu)] = saved_ctrl[:min(len(saved_ctrl), self.model.nu)]
+        mujoco.mj_forward(self.model, self.data)
+
+        self._last_joint_body_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_BODY, "gripper_static_1")
+        self._gripper_body_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_BODY, "gripper_moving_1")
+
+        self.viewer.close()
+        self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+        if self.current_view:
+            self.switch_view(self.current_view)
+
+        self._added_objs.append({"xml": obj_xml_path, "pos": pos})
+        print(f"已添加物体: {os.path.basename(obj_xml_path)} 位置={pos}")
+    
+    def reset(self):
+        """重置仿真状态，移除所有动态添加的物体，恢复初始模型"""
+        if self._added_objs:
+            self.model = mujoco.MjModel.from_xml_path(self.urdf_path)
+            self.data = mujoco.MjData(self.model)
+            self._last_joint_body_id = mujoco.mj_name2id(
+                self.model, mujoco.mjtObj.mjOBJ_BODY, "gripper_static_1")
+            self._gripper_body_id = mujoco.mj_name2id(
+                self.model, mujoco.mjtObj.mjOBJ_BODY, "gripper_moving_1")
+            self._added_objs.clear()
+            self.viewer.close()
+            self.viewer = mujoco.viewer.launch_passive(self.model, self.data)
+
+        key_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_KEY, "home")
+        if key_id >= 0:
+            mujoco.mj_resetDataKeyframe(self.model, self.data, key_id)
+        else:
+            mujoco.mj_resetData(self.model, self.data)
+
+        self.target_joint_positions = (
+            self.data.qpos[:self.model.nu].copy() if self.model.nu > 0 else np.array([])
+        )
+        mujoco.mj_forward(self.model, self.data)
+
+        if self.current_view:
+            self.switch_view(self.current_view)
+        print("仿真已重置")
 
 def _apply_pd_control(sim):
     """PD 控制：将 target_joint_positions 写入 data.ctrl"""

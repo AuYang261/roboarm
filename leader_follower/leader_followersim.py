@@ -130,6 +130,8 @@ def main():
     sim.add_view("side", {"distance": 2.5, "lookat": [0.0, 0.0, 0.0], "elevation": 0.0, "azimuth": 90.0})
     sim.switch_view("default")
 
+    sim.add_obj()
+
     print("MuJoCo 仿真已启动")
     print("\n=== Leader-Follower Simulation ===")
     print("移动物理 leader 机械臂，仿真模型会跟随移动")

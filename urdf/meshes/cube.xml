@@ -1,0 +1,9 @@
+<mujoco model="blue_cube">
+  <worldbody>
+    <body name="cube" pos="-1.2 0.0 -0.05">
+      <freejoint name="cube_freejoint"/>
+      <geom name="cube_geom" type="box" size="0.005 0.005 0.005"
+            rgba="0.2 0.6 1.0 1.0" mass="0.05"/>
+    </body>
+  </worldbody>
+</mujoco>
