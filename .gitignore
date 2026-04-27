@@ -13,6 +13,8 @@ sim/isaacSimKoch/
 IsaacLabs/
 tmp/
 sim/camera_simple_opt_output/
+sim/koch_img/
+recordings/
 
 *.txt
 .env
