@@ -34,7 +34,7 @@ def main():
             cv2.imwrite(img_name, frames["color"])
             print(f"Captured {img_name}")
             img_count += 1
-        elif key == ord("q"):  # 按 'q' 键退出
+        elif key == ord("q") or key == 27:  # 按 'q' 键退出
             print("Exiting...")
             break
     cam.close()

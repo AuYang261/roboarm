@@ -13,9 +13,25 @@ import numpy as np
 import piper_sdk
 from piper_sdk import C_PiperInterface_V2
 from scipy.spatial.transform import Rotation as R
+from scipy.optimize import minimize
+import kinpy
 from pathlib import Path
 import subprocess
 import re
+from xml.etree import ElementTree
+import warnings
+
+
+def deprecated(func):
+    def wrapper(*args, **kwargs):
+        warnings.warn(
+            f"Function {func.__name__} is deprecated.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return func(*args, **kwargs)
+
+    return wrapper
 
 
 class PiperBySDK(Arm):
@@ -27,7 +43,7 @@ class PiperBySDK(Arm):
     DEFAULT_DOWN_EULER_DEG_ZYX = [0.0, 180.0, 0.0]
     MAX_GRIPPER_ANGLE_DEG = 100
 
-    def __init__(self, move_mode_end_pose: bool = True, debug_mode: bool = False):
+    def __init__(self, move_mode_end_pose: bool = False, debug_mode: bool = False):
         """初始化 Piper 机械臂控制器。
 
         Args:
@@ -38,6 +54,31 @@ class PiperBySDK(Arm):
         self.debug_mode = debug_mode
         self.move_mode_end_pose = move_mode_end_pose
         self.timeout = 10 if debug_mode else 5
+
+        # 加载 URDF 构建运动学链
+        urdf_path = (
+            Path(__file__).resolve().parent.parent
+            / "urdf"
+            / "piper"
+            / "piper_description.urdf"
+        )
+        with open(urdf_path, "r", encoding="utf-8") as f:
+            urdf_content = f.read()
+        # 去掉 XML 声明，否则 ElementTree 解析 unicode 字符串会报错
+        urdf_content = re.sub(r"<\?xml[^?]*\?>", "", urdf_content, count=1)
+        self.chain = kinpy.build_serial_chain_from_urdf(urdf_content, "link6")
+        self.position_weight, self.rotation_weight = 10, 1
+
+        # 从 URDF 解析关节限位
+        urdf_xml = ElementTree.fromstring(urdf_content)
+        self.joint_bounds = []
+        for joint_elem in urdf_xml.findall("joint"):
+            if joint_elem.get("type") == "revolute":
+                limit = joint_elem.find("limit")
+                if limit is not None:
+                    lower = float(limit.get("lower", 0))
+                    upper = float(limit.get("upper", 0))
+                    self.joint_bounds.append((lower, upper))
 
         config_can_port = get_config_value("arm_port")
         try:
@@ -58,10 +99,12 @@ class PiperBySDK(Arm):
         if not self._enable_fun():
             print(self.piper.GetArmStatus())
             raise RuntimeError("Failed to enable Piper arm.")
+        self.set_move_mode(move_mode_end_pose=self.move_mode_end_pose)
         self.reset(self.move_mode_end_pose)
 
     # ========== 高层接口实现 ==========
 
+    # TODO: 如果直接移动太快，参考 LeroboArm 做线性插值
     def set_arm_angles(
         self,
         angles_deg: Sequence[float | int] | None = None,
@@ -99,16 +142,15 @@ class PiperBySDK(Arm):
             )
             start = time.time()
             while True:
-                status = self.piper.GetArmStatus()
+                # 这里获取有问题，有时候没到目标status.motion_status就为0了
+                # 所以感觉没啥用，还是得靠sleep固定时长等待到达
+                status = self.piper.GetArmStatus().arm_status
                 if status.arm_status != 0x0:
                     print(self.arm_status2str(status.arm_status))
                     # self.piper.JointConfig(clear_err=0xAE)
                     return False
-                if status.arm_status.motion_status == 0x00:
+                if status.motion_status == 0x00:
                     break
-                else:
-                    print(self.arm_status2str(status.arm_status.motion_status))
-                    # self.piper.JointConfig(clear_err=0xAE)
                 if time.time() - start > self.timeout:
                     print("set_arm_angles 超时")
                     break
@@ -145,6 +187,7 @@ class PiperBySDK(Arm):
             np.clip(gripper_0to1 / self.MAX_GRIPPER_ANGLE_DEG, 0, 1).round(2)
         )
 
+    # TODO: 后续可改用 self.chain.forward_kinematics() 本地 FK 替代 GetArmEndPoseMsgs
     def get_arm_pose(self) -> tuple[list[float] | None, list[float] | None]:
         try:
             return self.get_ee_pos().tolist(), self.get_ee_euler_zyx().tolist()
@@ -155,32 +198,26 @@ class PiperBySDK(Arm):
         self, gripper_open_0to1: float | None = None, safe_pos: bool = False
     ) -> bool:
         """safe_pos表示是否要移动到可安全失能的位置"""
-        if self.move_mode_end_pose:
-            self.set_move_mode(move_mode_end_pose=False)
+        angles = [0, 0, 0, 0, 25 if safe_pos else 0, 0]
+        return self.set_arm_angles(angles, gripper_open_0to1=gripper_open_0to1)
 
-        self.piper.JointCtrl(0, 0, 0, 0, int(25 * self.FACTOR) if safe_pos else 0, 0)
-        start = time.time()
-        flag = True
-        while True:
-            status = self.piper.GetArmStatus().arm_status
-            if status.arm_status != 0x0:
-                print(self.arm_status2str(status.arm_status))
-                # self.piper.JointConfig(clear_err=0xAE)
-                return False
-            if status.motion_status == 0x00:
-                break
-            if time.time() - start > self.timeout:
-                print("move_to_home 超时")
-                flag = False
-                break
+    @staticmethod
+    def _ik_cost_function(
+        joint_angles, target_pose_matrix, chain, position_weight, rotation_weight
+    ):
+        current_fk = chain.forward_kinematics(joint_angles)
+        current_pose_matrix = current_fk.matrix()
 
-        if gripper_open_0to1 is not None:
-            self.set_gripper(gripper_open_0to1=gripper_open_0to1)
+        pos_error = np.linalg.norm(
+            current_pose_matrix[:3, 3] - target_pose_matrix[:3, 3]
+        )
 
-        if self.move_mode_end_pose:
-            self.set_move_mode(move_mode_end_pose=True)
+        rot_error = (
+            R.from_matrix(current_pose_matrix[:3, :3])
+            * R.from_matrix(target_pose_matrix[:3, :3]).inv()
+        ).magnitude()
 
-        return flag
+        return (position_weight * pos_error) + (rotation_weight * rot_error)
 
     def move_to(
         self,
@@ -192,27 +229,42 @@ class PiperBySDK(Arm):
         if len(pos) != 3:
             raise ValueError("位置参数格式错误，应该是[x, y, z]")
 
-        if not self.move_mode_end_pose:
-            self.set_move_mode(move_mode_end_pose=True)
-            self.move_mode_end_pose = True
-
-        if not euler_angles_deg_zyx is None:
-            res = self.set_ee_pose(
-                position=pos, euler_angles_deg_zyx=euler_angles_deg_zyx
+        # 构建目标位姿
+        if euler_angles_deg_zyx is not None:
+            rot = R.from_euler("zyx", euler_angles_deg_zyx, degrees=True).as_euler(
+                "xyz"
             )
         else:
-            euler_angles_deg_zyx = list(self.DEFAULT_DOWN_EULER_DEG_ZYX)
+            target_euler = list(self.DEFAULT_DOWN_EULER_DEG_ZYX)
             if rot_rad is not None:
-                euler_angles_deg_zyx[0] = np.degrees(rot_rad)
+                target_euler[0] = np.degrees(rot_rad)
+            rot = R.from_euler("zyx", target_euler, degrees=True).as_euler("xyz")
+        goal_tf = kinpy.Transform(pos=np.array(pos), rot=rot)
 
-            res = self.set_ee_pose(
-                position=pos, euler_angles_deg_zyx=euler_angles_deg_zyx
-            )
+        # 读取当前关节角度作为 IK 初始猜测
+        current_angles_deg, _ = self.get_arm_angles()
+        if current_angles_deg is not None:
+            x0 = np.deg2rad(current_angles_deg)
+        else:
+            x0 = np.zeros(len(self.chain.get_joint_parameter_names()))
 
-        if gripper_open_0to1 is not None:
-            self.set_gripper(gripper_open_0to1=gripper_open_0to1)
-
-        return res
+        result = minimize(
+            self._ik_cost_function,
+            x0=x0,
+            args=(
+                goal_tf.matrix(),
+                self.chain,
+                self.position_weight,
+                self.rotation_weight,
+            ),
+            method="SLSQP",
+            bounds=self.joint_bounds,
+        )
+        if not result.success:
+            print("逆运动学不收敛，无法到达指定位置")
+            return False
+        angles_deg = np.rad2deg(result.x).tolist()
+        return self.set_arm_angles(angles_deg, gripper_open_0to1=gripper_open_0to1)
 
     def set_gripper(self, gripper_open_0to1: float):
         self.set_arm_angles(gripper_open_0to1=gripper_open_0to1)
@@ -260,8 +312,8 @@ class PiperBySDK(Arm):
 
         if move_mode_end_pose is not None:
             self.move_mode_end_pose = move_mode_end_pose
-        if move_mode_end_pose:
-            self.set_move_mode(move_mode_end_pose=True)
+            if move_mode_end_pose:
+                self.set_move_mode(move_mode_end_pose=True)
 
     def get_ee_pos(self) -> np.ndarray:
         """读取当前末端位置。
@@ -311,10 +363,11 @@ class PiperBySDK(Arm):
             degrees=True,
         ).as_quat()
 
+    @deprecated
     def set_ee_pose(
         self, position: list[float], euler_angles_deg_zyx: list[float]
     ) -> bool:
-        """设置末端位姿。
+        """设置末端位姿，调用sdk的末端位姿控制模式。但机械臂内部逆运动学经常返回目标角度超过限，不好用。
 
         Args:
             position: 目标位置 `[x, y, z]`，单位为米。
