@@ -193,7 +193,7 @@ class Arm:
             rot_rad=rot_rad,
         )
         if not res:
-            print("移动到目标位置失败，取消抓取")
+            print("移动到目标位置上方失败，取消抓取")
             self.move_to_home(gripper_open_0to1=1)
             return False
         time.sleep(self.catch_time_interval_s * 2)
@@ -218,7 +218,7 @@ class Arm:
             rot_rad=rot_rad,
         )
         if not res:
-            print("移动到目标位置失败，取消抓取")
+            print("抬起失败，取消抓取")
             self.move_to_home(gripper_open_0to1=1)
             return False
         time.sleep(self.catch_time_interval_s)
@@ -263,13 +263,13 @@ class Arm:
             rot_rad=rot_rad,
         )
         if not res:
-            print("移动到目标位置失败，取消放置")
+            print("移动到放置位置失败，取消放置")
             self.move_to_home(gripper_open_0to1=1)
             return False
         time.sleep(self.catch_time_interval_s * 2)
 
         self.set_gripper(gripper_open_0to1=1)
-        time.sleep(self.catch_time_interval_s)
+        # time.sleep(self.catch_time_interval_s)
         return True
 
     def catch_and_place(

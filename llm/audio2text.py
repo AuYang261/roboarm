@@ -24,6 +24,7 @@ import ssl
 from datetime import datetime
 from urllib.parse import urlencode
 from wsgiref.handlers import format_date_time
+
 try:
     import sounddevice as sd
 except:
@@ -35,6 +36,11 @@ from pathlib import Path
 STATUS_FIRST_FRAME = 0  # 第一帧的标识
 STATUS_CONTINUE_FRAME = 1  # 中间帧标识
 STATUS_LAST_FRAME = 2  # 最后一帧的标识
+
+https_proxy = get_config_value("https_proxy", None, False)
+if https_proxy is not None and https_proxy != "":
+    os.environ["http_proxy"] = https_proxy
+    os.environ["https_proxy"] = https_proxy
 
 
 def deprecated(func):

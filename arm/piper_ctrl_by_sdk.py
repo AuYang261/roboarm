@@ -27,7 +27,7 @@ class PiperBySDK(Arm):
     DEFAULT_DOWN_EULER_DEG_ZYX = [0.0, 180.0, 0.0]
     MAX_GRIPPER_ANGLE_DEG = 100
 
-    def __init__(self, move_mode_end_pose: bool = True, debug_mode: bool = True):
+    def __init__(self, move_mode_end_pose: bool = True, debug_mode: bool = False):
         """初始化 Piper 机械臂控制器。
 
         Args:
@@ -350,10 +350,14 @@ class PiperBySDK(Arm):
         start = time.time()
         while True:
             status = self.piper.GetArmStatus().arm_status
+            # 这里获取有问题，有时候没到目标status.motion_status就为0了
             if status.arm_status != 0x0:
                 print(self.arm_status2str(status.arm_status))
                 # self.piper.JointConfig(clear_err=0xAE)
                 return False
+            # pos = self.get_ee_pos()
+            # if status.motion_status == 0x00 and np.linalg.norm(pos - position) < 0.02:
+            #     return True
             if status.motion_status == 0x00:
                 return True
             if time.time() - start > self.timeout:

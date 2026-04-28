@@ -57,6 +57,7 @@ class LLMAPI:
     def __init__(self):
         https_proxy = get_config_value("https_proxy", None, False)
         if https_proxy is not None and https_proxy != "":
+            os.environ["http_proxy"] = https_proxy
             os.environ["https_proxy"] = https_proxy
 
         prompts_file = get_config_value("prompts_file")
