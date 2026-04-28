@@ -27,8 +27,10 @@ from wsgiref.handlers import format_date_time
 
 try:
     import sounddevice as sd
-except:
-    print("Import sounddevice error. Maybe no audio input device.")
+except Exception as e:
+    print(e)
+    print("Import sounddevice error.")
+    print("Try 'sudo apt install portaudio19-dev'. Or no audio input device.")
 import wave
 import requests
 from pathlib import Path

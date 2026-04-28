@@ -131,8 +131,11 @@ def catch_by_instruction(
         print("Instruction:", instruction)
         class_pos = get_config_value("class_pos")
         offset = get_config_value("catch_offset")
-        default_gripper_aside_pos = get_config_value("default_gripper_aside_pos")
-        arm.move_to(default_gripper_aside_pos)
+        default_gripper_aside_pos = get_config_value(
+            "default_gripper_aside_pos", raise_if_missing=False
+        )
+        if default_gripper_aside_pos is not None:
+            arm.move_to(default_gripper_aside_pos)
         time.sleep(0.5)
         print("LLM Detecting...")
         start = time.time()
@@ -240,10 +243,14 @@ def catch_by_text_instruction():
                     lambda: instructions.remove(instruction),
                 )
             else:
-                future = executor.submit(
-                    arm.move_to,
-                    get_config_value("default_gripper_aside_pos"),
+                default_gripper_aside_pos = get_config_value(
+                    "default_gripper_aside_pos", raise_if_missing=False
                 )
+                if default_gripper_aside_pos is not None:
+                    future = executor.submit(
+                        arm.move_to,
+                        default_gripper_aside_pos,
+                    )
         if not thread.is_alive():
             break
     cam.close()

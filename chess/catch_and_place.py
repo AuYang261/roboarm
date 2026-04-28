@@ -23,7 +23,9 @@ def main():
         os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
         for path in get_config_value("chinese_chess_YOLO_model_path", [])
     ]
-    default_gripper_aside_pos = get_config_value("default_gripper_aside_pos")
+    default_gripper_aside_pos = get_config_value(
+        "default_gripper_aside_pos", raise_if_missing=False
+    )
     default_conf_thres = get_config_value("chinese_chess_default_conf_thres")
     offset = get_config_value("catch_offset")
 
@@ -91,7 +93,7 @@ def main():
                     )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 
-            if future is None or future.done():
+            if default_gripper_aside_pos and (future is None or future.done()):
                 # 移到旁边以免挡住视野
                 future = executor.submit(
                     arm.move_to,
