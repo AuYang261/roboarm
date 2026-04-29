@@ -2,7 +2,6 @@
 import sys
 import os
 
-
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 sys.path.append(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "lerobot/src/")
@@ -92,17 +91,6 @@ class LeroboArm(Arm):
                     else ""
                 )
             ) from e
-
-    def __del__(self):
-        try:
-            self.move_to_home(gripper_open_0to1=1)
-            time.sleep(self.catch_time_interval_s)
-        except Exception as e:
-            print(f"LeroboArm 析构复位失败: {e}")
-        try:
-            self.disconnect_arm()
-        except Exception as e:
-            print(f"LeroboArm 断开连接失败: {e}")
 
     def set_arm_angles(
         self,
@@ -256,7 +244,7 @@ class LeroboArm(Arm):
 
 
 if __name__ == "__main__":
-    arm: LeroboArm = Arm()  # type:ignore
+    arm: LeroboArm = Arm()  # type: ignore
     time.sleep(1)
     arm.move_to_home(gripper_open_0to1=1)
     time.sleep(1)
