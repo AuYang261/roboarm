@@ -41,6 +41,10 @@ def step_towards(current, target, step_size = 10) -> dict:
     return result   
     
 
+DISABLE_TIME = 300
+TOP_CAM_IDX = 4
+ARM_CAM_IDX = 2
+
 def main():
     parser = argparse.ArgumentParser(description="Leader-Follower Control")
     parser.add_argument(
@@ -145,6 +149,7 @@ def main():
     frequency = 100
 
     follower_arm_right.enable_torque()
+    enable_flag = True
 
     # 初始化录制相关变量
     trajectory_data = []
@@ -202,7 +207,7 @@ def main():
         """
         try:
             # 尝试打开顶部相机 (Orbbec Gemini 215 RGB Camera, index 0)
-            camera_top = cv2.VideoCapture(4)
+            camera_top = cv2.VideoCapture(TOP_CAM_IDX)
             if camera_top.isOpened():
                 # 设置分辨率
                 camera_top.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -222,7 +227,7 @@ def main():
 
         try:
             # 尝试打开手臂相机 (USB 视频设备, index 4)
-            camera_arm = cv2.VideoCapture(2)
+            camera_arm = cv2.VideoCapture(ARM_CAM_IDX)
             if camera_arm.isOpened():
                 # 设置分辨率
                 camera_arm.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -245,6 +250,7 @@ def main():
     print("按 'q' + Enter 退出")
 
     start_time = time.time()
+    
 
     for frame_idx in range(seconds * frequency):
         # 使用正确的键名 "left" 和 "right"
@@ -254,14 +260,18 @@ def main():
             for motor in leader_arm_left.motors.keys():
                 leader_pos_left[motor] = leader_arm_left.read("Present_Position", motor=motor)
 
-            for motor in follower_arm_right.motors.keys():
-                follow_pos_right[motor] = follower_arm_right.read("Present_Position", motor=motor)
+            if enable_flag:
+                for motor in follower_arm_right.motors.keys():
+                    follow_pos_right[motor] = follower_arm_right.read("Present_Position", motor=motor)
+                target_pos = step_towards(follow_pos_right, leader_pos_left, step_size=10)
+                # 将 leader 的位置发送到 follower
+                for motor, leader_pos in target_pos.items():
+                    follower_arm_right.write("Goal_Position", motor, leader_pos)
 
-            target_pos = step_towards(follow_pos_right, leader_pos_left, step_size=10)
-
-            # 将 leader 的位置发送到 follower
-            for motor, leader_pos in target_pos.items():
-                follower_arm_right.write("Goal_Position", motor, leader_pos)
+            if enable_flag and DISABLE_TIME > 0 and DISABLE_TIME < frame_idx :
+                print("disable torque")
+                follower_arm_right.disable_torque()
+                enable_flag = False
 
             # 记录轨迹数据
             if args.record:
@@ -343,22 +353,7 @@ def main():
                 print("ESC pressed, exiting...")
                 break
 
-            # 检测控制台是否输入 q 来退出（跨平台兼容）
-            if platform.system() == 'Windows':
-                # Windows: 使用 msvcrt.kbhit() 检查键盘输入
-                if msvcrt.kbhit():
-                    key = msvcrt.getch()
-                    if key == b'q':
-                        print("Exiting...")
-                        break
-            else:
-                # Linux/Mac: 使用 select
-                if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
-                    line = sys.stdin.readline()
-                    if line.strip() == 'q':
-                        print("Exiting...")
-                        break
-
+           
         except Exception as e:
             print(f"Error in control loop: {e}")
             pass
