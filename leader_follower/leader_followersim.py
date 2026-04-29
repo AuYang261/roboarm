@@ -27,7 +27,7 @@ REMOTE = True
 
 IP = "192.168.2.12"
 PORT = 3456
-MODE = "pos" # pos 位置控制 or tor位姿控制
+MODE = "tor" # pos 位置控制 or tor位姿控制
 
 STEPS = 1
 KEY_BOARD = False # 通过键盘控制
@@ -225,12 +225,14 @@ def main():
                     # 如果 是 位姿 控制模式 ， 计算出位姿数据并发送
                     
                     if MODE == "tor":
-                        # 计算末端执行器位姿
                         poses = sim.get_current_poses()
                         pos, quat = poses['last_joint']['pos'], poses['last_joint']['quat']
-                        gripper_angle = rad_angles[5]  # gripper 是第6个关节
-                        # print(f"发送位姿数据: pos={pos}, quat={quat}, angle={gripper_angle}")
-                        send_data = json.dumps({"position": pos, "orientation": quat, "gripper_angle": gripper_angle}).encode("utf-8")
+                        gripper_angle = rad_angles[5]
+                        send_data = json.dumps({
+                            "position": np.asarray(pos).tolist(),
+                            "orientation": np.asarray(quat).tolist(),
+                            "gripper_angle": float(gripper_angle),
+                        }).encode("utf-8")
                     else:
                         send_data = json.dumps({"rad_angles": rad_angles}).encode("utf-8")
                     main._sock.sendto(send_data, main._addr)
