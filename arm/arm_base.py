@@ -8,6 +8,7 @@ from typing import cast
 import cv2
 import numpy as np
 from config_getter import get_config_value
+from scipy.spatial.transform import Rotation as R
 from typing_extensions import Self
 
 
@@ -17,6 +18,10 @@ class Arm:
     `Arm()` 会根据配置项 `arm_type` 实际返回对应的机械臂子类实例，
     公共的抓取、放置和手眼标定坐标转换逻辑统一放在这里复用。
     """
+
+    IK_POSITION_TOLERANCE_M = 0.01
+    IK_TILT_TOLERANCE_RAD = np.deg2rad(5.0)
+    IK_YAW_TOLERANCE_RAD = np.deg2rad(10.0)
 
     # arm_type -> (module_path, class_name)
     _ARM_TYPES = {
@@ -167,6 +172,34 @@ class Arm:
         """关闭机械臂和夹爪使能。"""
         raise NotImplementedError("disable_torque method must be implemented in subclass")
 
+    @staticmethod
+    def _wrap_angle_rad(angle_rad: float) -> float:
+        return float(np.arctan2(np.sin(angle_rad), np.cos(angle_rad)))
+
+    @classmethod
+    def _ik_cost_function(cls, joint_angles, target_pose_matrix, chain):
+        current_pose_matrix = chain.forward_kinematics(joint_angles).matrix()
+
+        pos_error = np.linalg.norm(
+            current_pose_matrix[:3, 3] - target_pose_matrix[:3, 3]
+        )
+
+        current_rot = R.from_matrix(current_pose_matrix[:3, :3])
+        target_rot = R.from_matrix(target_pose_matrix[:3, :3])
+        current_z_axis = current_rot.apply([0.0, 0.0, 1.0])
+        target_z_axis = target_rot.apply([0.0, 0.0, 1.0])
+        cosine = np.clip(np.dot(current_z_axis, target_z_axis), -1.0, 1.0)
+        tilt_error = float(np.arccos(cosine))
+
+        current_yaw = current_rot.as_euler("zyx")[0]
+        target_yaw = target_rot.as_euler("zyx")[0]
+        yaw_error = abs(cls._wrap_angle_rad(current_yaw - target_yaw))
+
+        pos_term = (pos_error / cls.IK_POSITION_TOLERANCE_M) ** 2
+        tilt_term = (tilt_error / cls.IK_TILT_TOLERANCE_RAD) ** 2
+        yaw_term = (yaw_error / cls.IK_YAW_TOLERANCE_RAD) ** 2
+        return float(pos_term + tilt_term + yaw_term)
+
     def catch(
         self,
         target_x: float,
@@ -245,6 +278,7 @@ class Arm:
         target_y: float,
         target_z: float,
         rot_rad: float = 0,
+        down: bool = False,
     ) -> bool:
         """执行放置动作。
 
@@ -253,6 +287,7 @@ class Arm:
             target_y: 放置点 y 坐标，单位为米。
             target_z: 放置点 z 坐标，单位为米。
             rot_rad: 放置时末端绕 z 轴的旋转角，单位为弧度。
+            down: 是否下降后再放置，默认为False。
 
         Returns:
             放置是否成功。
@@ -263,13 +298,37 @@ class Arm:
             rot_rad=rot_rad,
         )
         if not res:
-            print("移动到放置位置失败，取消放置")
+            print("移动到放置位置上方失败，取消放置")
             self.move_to_home(gripper_open_0to1=1)
             return False
         time.sleep(self.catch_time_interval_s * 2)
 
+        if down:
+            res = self.move_to(
+                [target_x, target_y, target_z],
+                gripper_open_0to1=0,
+                rot_rad=rot_rad,
+            )
+            if not res:
+                print("移动到放置位置失败，取消放置")
+                self.move_to_home(gripper_open_0to1=1)
+                return False
+            time.sleep(self.catch_time_interval_s)
+
         self.set_gripper(gripper_open_0to1=1)
-        # time.sleep(self.catch_time_interval_s)
+
+        if down:
+            res = self.move_to(
+                [target_x, target_y, target_z + self.place_raise_height],
+                gripper_open_0to1=1,
+                rot_rad=rot_rad,
+            )
+            if not res:
+                print("移动到放置位置上方失败，取消放置")
+                self.move_to_home(gripper_open_0to1=1)
+                return False
+            time.sleep(self.catch_time_interval_s)
+
         return True
 
     def catch_and_place(

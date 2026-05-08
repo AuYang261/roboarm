@@ -169,25 +169,21 @@ def catch_by_instruction(
                             box.box_height,
                             box.box_rotation_deg,
                         )
-                        if "红" in box.class_name or "red" in box.class_name.lower():
-                            print("红色积木，放置到红色区域")
-                            place_pos = class_pos.get("red_block")
-                        elif (
-                            "黄" in box.class_name or "yellow" in box.class_name.lower()
-                        ):
-                            print("黄色积木，放置到黄色区域")
-                            place_pos = class_pos.get("yellow_block")
-                        elif "蓝" in box.class_name or "blue" in box.class_name.lower():
-                            print("蓝色积木，放置到蓝色区域")
-                            place_pos = class_pos.get("blue_block")
-                        elif (
-                            "绿" in box.class_name or "green" in box.class_name.lower()
-                        ):
-                            print("绿色积木，放置到绿色区域")
-                            place_pos = class_pos.get("green_block")
-                        else:
+                        found = False
+                        place_pos = [0.1, 0.0]
+                        class_name = ""
+                        for name, pos in class_pos.items():
+                            for keyword in pos.get("keywords", []):
+                                if keyword in box.class_name.lower():
+                                    print(f"放置到'{name}'区域")
+                                    place_pos = pos.get("pos", place_pos)
+                                    found = True
+                                    class_name = name
+                                    break
+                            if found:
+                                break
+                        if not found:
                             print("未知积木，放置到默认区域")
-                            place_pos = class_pos.get("blue_block")
                         catch_success = arm.catch_and_place(
                             target_x + offset * np.cos(gripper_angle_rad),
                             target_y + offset * np.sin(-gripper_angle_rad),

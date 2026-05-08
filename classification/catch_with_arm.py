@@ -66,7 +66,11 @@ def main():
                     )
                     if (
                         np.linalg.norm(
-                            np.array(class_pos.get(class_name, [-0.2, 0.0]))
+                            np.array(
+                                class_pos.get(class_name, {"pos": [-0.2, 0.0]}).get(
+                                    "pos"
+                                )
+                            )
                             - np.array([target_x, target_y])
                         )
                         < place_distance_threshold
@@ -81,7 +85,7 @@ def main():
                             target_x + offset * np.cos(gripper_angle_rad),
                             target_y + offset * np.sin(-gripper_angle_rad),
                             gripper_angle_rad,
-                            class_pos.get(class_name, [-0.2, 0.0]),
+                            class_pos.get(class_name, {"pos": [-0.2, 0.0]}).get("pos"),
                         )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 

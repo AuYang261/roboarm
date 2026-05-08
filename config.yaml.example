@@ -86,13 +86,23 @@ default_conf_thres: 0.85
 default_gripper_close_threshold: 0.05
 
 # 各类别放置位置，(x,y)，单位米
+# keywords表示大模型输出的标签中含有其中某个关键词即认为是这个类别
 class_pos:
   blue_block:
-    - 0.2
-    - 0
+    pos:
+      - 0.2
+      - 0
+    keywords:
+      - 'blue'
+      - '蓝'
   white_block:
-    - -0.2
-    - 0
+    pos:
+      - -0.2
+      - 0
+    keywords:
+      - 'white'
+      - '白'
+
 
 # 离放置位置多近时无需抓取，以免反复抓放，单位米
 place_distance_threshold: 0.05

@@ -67,7 +67,6 @@ class PiperBySDK(Arm):
         # 去掉 XML 声明，否则 ElementTree 解析 unicode 字符串会报错
         urdf_content = re.sub(r"<\?xml[^?]*\?>", "", urdf_content, count=1)
         self.chain = kinpy.build_serial_chain_from_urdf(urdf_content, "link6")
-        self.position_weight, self.rotation_weight = 10, 1
 
         # 从 URDF 解析关节限位
         urdf_xml = ElementTree.fromstring(urdf_content)
@@ -201,24 +200,6 @@ class PiperBySDK(Arm):
         angles = [0, 0, 0, 0, 25 if safe_pos else 0, 0]
         return self.set_arm_angles(angles, gripper_open_0to1=gripper_open_0to1)
 
-    @staticmethod
-    def _ik_cost_function(
-        joint_angles, target_pose_matrix, chain, position_weight, rotation_weight
-    ):
-        current_fk = chain.forward_kinematics(joint_angles)
-        current_pose_matrix = current_fk.matrix()
-
-        pos_error = np.linalg.norm(
-            current_pose_matrix[:3, 3] - target_pose_matrix[:3, 3]
-        )
-
-        rot_error = (
-            R.from_matrix(current_pose_matrix[:3, :3])
-            * R.from_matrix(target_pose_matrix[:3, :3]).inv()
-        ).magnitude()
-
-        return (position_weight * pos_error) + (rotation_weight * rot_error)
-
     def move_to(
         self,
         pos: list[float],
@@ -251,12 +232,7 @@ class PiperBySDK(Arm):
         result = minimize(
             self._ik_cost_function,
             x0=x0,
-            args=(
-                goal_tf.matrix(),
-                self.chain,
-                self.position_weight,
-                self.rotation_weight,
-            ),
+            args=(goal_tf.matrix(), self.chain),
             method="SLSQP",
             bounds=self.joint_bounds,
         )

@@ -48,7 +48,6 @@ class LeroboArm(Arm):
         super().__init__(hand_eye_calibration_file=hand_eye_calibration_file)
         port = get_config_value("arm_port")
         self.steps = steps
-        self.position_weight, self.rotation_weight = 10, 1
         self.offset = get_config_value("arm_offset")
         if len(self.offset) != 5:
             raise ValueError(
@@ -205,12 +204,7 @@ class LeroboArm(Arm):
         angles_deg = minimize(
             self._ik_cost_function,
             x0=np.zeros(len(self.chain.get_joint_parameter_names())),
-            args=(
-                goal_tf.matrix(),
-                self.chain,
-                self.position_weight,
-                self.rotation_weight,
-            ),
+            args=(goal_tf.matrix(), self.chain),
             method="SLSQP",
         )
         if not angles_deg.success:
@@ -223,24 +217,6 @@ class LeroboArm(Arm):
 
     def set_gripper(self, gripper_open_0to1: float):
         self.set_arm_angles(gripper_open_0to1=gripper_open_0to1)
-
-    @staticmethod
-    def _ik_cost_function(
-        joint_angles, target_pose_matrix, chain, position_weight, rotation_weight
-    ):
-        current_fk = chain.forward_kinematics(joint_angles)
-        current_pose_matrix = current_fk.matrix()
-
-        pos_error = np.linalg.norm(
-            current_pose_matrix[:3, 3] - target_pose_matrix[:3, 3]
-        )
-
-        rot_error = (
-            R.from_matrix(current_pose_matrix[:3, :3])
-            * R.from_matrix(target_pose_matrix[:3, :3]).inv()
-        ).magnitude()
-
-        return (position_weight * pos_error) + (rotation_weight * rot_error)
 
 
 if __name__ == "__main__":
