@@ -19,7 +19,7 @@ import time
 import threading
 
 
-REFERENCE_LABELS = ("A", "B", "C")
+TEACHING_POINT_LABELS = tuple(str(i + 1) for i in range(16))
 
 
 def pack_end_pose(
@@ -63,14 +63,36 @@ def index_to_row_col(index: int, pattern_size: tuple[int, int]) -> tuple[int, in
     return row, col
 
 
-def select_reference_corner_indices(pattern_size: tuple[int, int]) -> np.ndarray:
+def select_teaching_corner_indices(pattern_size: tuple[int, int]) -> np.ndarray:
     cols, rows = pattern_size
     if cols < 2 or rows < 2:
         raise ValueError("棋盘格内角点行列数至少都要大于等于2")
-    top_left = 0
-    top_right = cols - 1
-    bottom_left = (rows - 1) * cols
-    return np.array([top_left, top_right, bottom_left], dtype=np.int32)
+
+    top_row = 0
+    bottom_row = rows - 1
+    left_col = 0
+    right_col = cols - 1
+    mid_row = rows // 2
+    mid_col = cols // 2
+
+    ordered_points = [
+        (top_row, left_col),
+        (top_row, mid_col),
+        (top_row, right_col),
+        (mid_row, right_col),
+        (bottom_row, right_col),
+        (bottom_row, mid_col),
+        (bottom_row, left_col),
+        (mid_row, left_col),
+        (mid_row, mid_col),
+    ]
+
+    unique_points: list[tuple[int, int]] = []
+    for point in ordered_points:
+        if point not in unique_points:
+            unique_points.append(point)
+
+    return np.array([row * cols + col for row, col in unique_points], dtype=np.int32)
 
 
 def make_board_index_points(pattern_size: tuple[int, int]) -> np.ndarray:
@@ -95,9 +117,10 @@ def draw_reference_points(
         x, y = corners[int(corner_index)]
         color = (0, 255, 255) if label_idx == active_reference_idx else (0, 0, 255)
         cv2.circle(image_to_show, (int(x), int(y)), 10, color, 2)
+        label = TEACHING_POINT_LABELS[label_idx]
         cv2.putText(
             image_to_show,
-            REFERENCE_LABELS[label_idx],
+            label,
             (int(x) + 12, int(y) - 12),
             cv2.FONT_HERSHEY_SIMPLEX,
             1,
@@ -105,23 +128,6 @@ def draw_reference_points(
             2,
         )
     return image_to_show
-
-
-def fit_affine_board_to_robot(
-    board_index_points: np.ndarray, reference_robot_points: np.ndarray
-) -> np.ndarray:
-    affine_matrix = cv2.getAffineTransform(
-        board_index_points.astype(np.float32), reference_robot_points.astype(np.float32)
-    )
-    return affine_matrix.astype(np.float32)
-
-
-def apply_affine_to_points(affine_matrix: np.ndarray, points: np.ndarray) -> np.ndarray:
-    homogeneous_points = np.concatenate(
-        [points.astype(np.float32), np.ones((points.shape[0], 1), dtype=np.float32)],
-        axis=1,
-    )
-    return (affine_matrix @ homogeneous_points.T).T.astype(np.float32)
 
 
 def calibrate_2d_from_correspondences(
@@ -236,19 +242,15 @@ def teach_board_reference_points(
     arm: Arm,
     cam: Camera,
     pattern_size: tuple[int, int],
-    round_index: int,
-    round_count: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    reference_indices: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
     window_name = "Camera"
-    reference_robot_points: list[np.ndarray] = []
-    locked_reference_indices: np.ndarray | None = None
     locked_corners: np.ndarray | None = None
+    robot_points: list[np.ndarray] = []
     current_step = 0
-    print(
-        f"请先固定棋盘格。第 {round_index + 1}/{round_count} 轮：按回车锁定当前A/B/C位置，随后按三次空格依次记录A/B/C位姿。"
-    )
+    print("请先固定棋盘格。按回车锁定当前棋盘位置，随后按提示依次示教各个角点。")
 
-    while current_step < len(REFERENCE_LABELS):
+    while current_step < len(reference_indices):
         frames = cam.get_frames()
         color_image = frames.get("color")
         if color_image is None:
@@ -258,17 +260,14 @@ def teach_board_reference_points(
         corners = detect_chessboard_points(color_image, pattern_size)
         image_to_show = color_image.copy()
 
-        if locked_reference_indices is None:
+        if locked_corners is None:
             if corners is not None:
-                current_reference_indices = select_reference_corner_indices(
-                    pattern_size
-                )
                 image_to_show = draw_reference_points(
-                    color_image, corners, current_reference_indices, None
+                    color_image, corners, reference_indices, None
                 )
             cv2.putText(
                 image_to_show,
-                "Press Enter to lock current A/B/C positions",
+                "Press Enter to lock current chessboard",
                 (10, 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.75,
@@ -292,26 +291,21 @@ def teach_board_reference_points(
             if key != 13:
                 continue
             if corners is None:
-                print("当前未检测到完整棋盘格，无法锁定A/B/C位置。")
+                print("当前未检测到完整棋盘格，无法锁定。")
                 continue
 
-            locked_reference_indices = select_reference_corner_indices(pattern_size)
             locked_corners = corners.copy()
-            print("已锁定当前A/B/C位置，接下来按三次空格依次记录A/B/C位姿。")
+            print("已锁定棋盘，接下来按提示依次示教各个角点。")
             continue
 
-        image_to_show = color_image.copy()
-        display_corners = locked_corners
-        assert display_corners is not None
         image_to_show = draw_reference_points(
-            image_to_show,
-            display_corners,
-            locked_reference_indices,
-            current_step,
+            color_image, locked_corners, reference_indices, current_step
         )
+        current_corner_index = int(reference_indices[current_step])
+        row, col = index_to_row_col(current_corner_index, pattern_size)
         cv2.putText(
             image_to_show,
-            f"Move gripper to {REFERENCE_LABELS[current_step]} then press Space",
+            f"Move gripper to point {current_step + 1} then press Space",
             (10, 30),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.75,
@@ -320,7 +314,7 @@ def teach_board_reference_points(
         )
         cv2.putText(
             image_to_show,
-            "Live video stays on. Enter unlocks A/B/C.",
+            f"Target row={row}, col={col}. Enter unlocks chessboard.",
             (10, 65),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
@@ -333,11 +327,10 @@ def teach_board_reference_points(
         if key == 27:
             raise KeyboardInterrupt
         if key == 13:
-            locked_reference_indices = None
             locked_corners = None
             current_step = 0
-            reference_robot_points.clear()
-            print("已解锁A/B/C位置，请重新调整棋盘并按回车锁定。")
+            robot_points.clear()
+            print("已解锁棋盘，请重新调整棋盘并按回车锁定。")
             continue
         if key != ord(" "):
             continue
@@ -348,23 +341,16 @@ def teach_board_reference_points(
             print("获取机械臂末端位姿失败")
             continue
 
-        reference_robot_points.append(end_pose[:2].astype(np.float32))
-        row, col = index_to_row_col(
-            int(locked_reference_indices[current_step]), pattern_size
-        )
+        robot_points.append(end_pose[:2].astype(np.float32))
         print(
-            f"已记录参考点 {REFERENCE_LABELS[current_step]} (row={row}, col={col}) -> "
+            f"已记录点 {current_step + 1} (row={row}, col={col}) -> "
             f"({end_pose[0]:.6f}, {end_pose[1]:.6f})"
         )
         current_step += 1
 
-    assert locked_reference_indices is not None
     assert locked_corners is not None
-    return (
-        locked_reference_indices,
-        locked_corners,
-        np.array(reference_robot_points, dtype=np.float32),
-    )
+    image_points = locked_corners[reference_indices].astype(np.float32)
+    return image_points, np.array(robot_points, dtype=np.float32)
 
 
 def collect_board_correspondences(
@@ -373,7 +359,6 @@ def collect_board_correspondences(
     reference_indices_path: str,
     reference_robot_points_path: str,
     pattern_size: tuple[int, int],
-    capture_count: int,
 ):
     window_name = "Camera"
     cv2.namedWindow(window_name)
@@ -382,42 +367,11 @@ def collect_board_correspondences(
     arm.disable_torque()
     cam = Camera(color=True, depth=False)
 
-    all_image_points: list[np.ndarray] = []
-    all_robot_points: list[np.ndarray] = []
-    all_reference_robot_points: list[np.ndarray] = []
-    reference_indices: np.ndarray | None = None
-
     try:
-        for round_index in range(capture_count):
-            locked_reference_indices, locked_corners, reference_robot_points = (
-                teach_board_reference_points(
-                    arm, cam, pattern_size, round_index, capture_count
-                )
-            )
-            if reference_indices is None:
-                reference_indices = locked_reference_indices
-            reference_board_points = make_board_index_points(pattern_size)[
-                locked_reference_indices
-            ]
-            affine_matrix = fit_affine_board_to_robot(
-                reference_board_points, reference_robot_points
-            )
-            all_robot_points.append(
-                apply_affine_to_points(
-                    affine_matrix, make_board_index_points(pattern_size)
-                ).astype(np.float32)
-            )
-            all_image_points.append(locked_corners.astype(np.float32))
-            all_reference_robot_points.append(reference_robot_points.astype(np.float32))
-
-        if reference_indices is None:
-            raise RuntimeError("未采集到任何标定数据")
-
-        image_points = np.concatenate(all_image_points, axis=0).astype(np.float32)
-        robot_points = np.concatenate(all_robot_points, axis=0).astype(np.float32)
-        reference_robot_points_array = np.stack(
-            all_reference_robot_points, axis=0
-        ).astype(np.float32)
+        reference_indices = select_teaching_corner_indices(pattern_size)
+        image_points, robot_points = teach_board_reference_points(
+            arm, cam, pattern_size, reference_indices
+        )
 
         homography_matrix, inlier_mask = calibrate_2d_from_correspondences(
             image_points, robot_points
@@ -425,7 +379,7 @@ def collect_board_correspondences(
         np.save(image_points_path, image_points)
         np.save(robot_points_path, robot_points)
         np.save(reference_indices_path, reference_indices)
-        np.save(reference_robot_points_path, reference_robot_points_array)
+        np.save(reference_robot_points_path, robot_points)
         return image_points_path, robot_points_path, homography_matrix, inlier_mask
     finally:
         cv2.destroyAllWindows()
@@ -532,7 +486,12 @@ def test_handeye_2d(homography_matrix):
 
 def main():
     argparser = argparse.ArgumentParser(description="机械臂手眼标定2D版")
-    argparser.add_argument("--mode", type=str, default="calibrate_board", help="模式")
+    argparser.add_argument(
+        "--mode",
+        type=str,
+        default="test",
+        help="模式: calibrate 手动采集多点; calibrate_board 半自动采集多点; test 测试",
+    )
     argparser.add_argument(
         "--pattern-cols", type=int, default=7, help="棋盘格每行内角点数"
     )
@@ -540,7 +499,10 @@ def main():
         "--pattern-rows", type=int, default=7, help="棋盘格每列内角点数"
     )
     argparser.add_argument(
-        "--capture-count", type=int, default=1, help="自动采集整板角点的帧数"
+        "--capture-count",
+        type=int,
+        default=1,
+        help="保留参数，当前calibrate_board流程未使用",
     )
     args = argparser.parse_args()
 
@@ -581,7 +543,6 @@ def main():
             reference_indices_path,
             reference_robot_points_path,
             pattern_size,
-            args.capture_count,
         )
         np.save(homography_matrix_path, homography_matrix)
 
