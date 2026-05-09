@@ -116,6 +116,9 @@ catch_raise_height: 0.1
 # 放置前抬起的高度，单位米
 place_raise_height: 0.1
 
+# 放置时是否先下降再松开夹爪，默认否
+go_down_before_open_gripper_in_place: False
+
 # =======主从臂跟随场景=======
 
 leader_port: COM5

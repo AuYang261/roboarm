@@ -278,7 +278,6 @@ class Arm:
         target_y: float,
         target_z: float,
         rot_rad: float = 0,
-        down: bool = False,
     ) -> bool:
         """执行放置动作。
 
@@ -303,6 +302,9 @@ class Arm:
             return False
         time.sleep(self.catch_time_interval_s * 2)
 
+        down = get_config_value(
+            "go_down_before_open_gripper_in_place", False, raise_if_missing=False
+        )
         if down:
             res = self.move_to(
                 [target_x, target_y, target_z],

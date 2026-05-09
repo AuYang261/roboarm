@@ -6,7 +6,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.camera_api import Camera
 from config_getter import get_config_value
 from pydantic import TypeAdapter
-from llm.dataclass import DetectedFromLLM
+from llm.dataclass import DetectedBox, DetectedFromLLM
 from llm.audio2text import get_audio_text
 import cv2
 import numpy as np
@@ -57,7 +57,30 @@ frame = None
 
 def consumption_thread():
     global frame, box_queue
+    idx = 0
+
+    def mouse_callback(event, x, y, flags, param):
+        nonlocal idx
+        if event == cv2.EVENT_LBUTTONDOWN:
+            print(f"Left button clicked at ({x}, {y})")
+            # 手动点击目标，替换大模型识别结果，可靠性要求高的时候启用
+            # names = "8周年快乐"
+            # box_queue.put(
+            #     DetectedBox(
+            #         class_name=names[idx],
+            #         box_center_x=x,
+            #         box_center_y=y,
+            #         box_width=100,
+            #         box_height=150,
+            #     )
+            # )
+            # idx += 1
+
     box = None
+    window_name = "Camera"
+    cv2.namedWindow(window_name)
+    cv2.setMouseCallback(window_name, mouse_callback)
+
     while True:
         if not box_queue.empty():
             box = box_queue.get(block=False)
@@ -67,7 +90,7 @@ def consumption_thread():
             boxes=[box] if box else [],
             frame=frame,
         )
-        cv2.imshow("LLM Detection", frame_draw)
+        cv2.imshow(winname=window_name, mat=frame_draw)
         if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
             cv2.destroyAllWindows()
             arm.disconnect_arm()
@@ -156,6 +179,8 @@ def catch_by_instruction(
                     box = json2box(response, img_w=frame.shape[1], img_h=frame.shape[0])
                     print("检测到的目标:", box)
                     if box:
+                        # 手动点击目标，替换大模型识别结果，可靠性要求高的时候启用
+                        # box = queue_output.get(block=True)
                         queue_output.put(box)
                         # 将图像坐标转换为机械臂坐标系
                         target_x, target_y = arm.pixel2pos(
