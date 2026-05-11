@@ -93,6 +93,7 @@ def consumption_thread():
         cv2.imshow(winname=window_name, mat=frame_draw)
         if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
             cv2.destroyAllWindows()
+            arm.move_to_home()
             arm.disconnect_arm()
             break
 
@@ -230,10 +231,6 @@ def catch_by_text_instruction():
     global frame, box_queue
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     instructions = [
-        # "抓取蓝色积木",
-        # "抓取黄色积木",
-        # "抓取红色积木",
-        # "抓取绿色积木",
         "抓取最近的积木",
         "抓取红色积木",
         "抓取最右边的红色积木",
@@ -254,8 +251,8 @@ def catch_by_text_instruction():
             continue
         if future is None or future.done():
             if len(instructions) > 0:
-                # instruction = instructions[0]
-                instruction = instructions[np.random.randint(0, len(instructions))]
+                instruction = instructions[0]
+                # instruction = instructions[np.random.randint(0, len(instructions))]
                 future = executor.submit(
                     catch_by_instruction,
                     frame,

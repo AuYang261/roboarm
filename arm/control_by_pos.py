@@ -133,7 +133,7 @@ def main():
     pos, rot = arm.get_arm_pose()
     if pos:
         TARGET_POSE[:3] = np.array(pos)
-        TARGET_POSE[2] += 0.05
+        # TARGET_POSE[2] += 0.05
     if rot:
         TARGET_POSE[3:6] = np.deg2rad(rot)
     while True:

@@ -243,12 +243,16 @@ def teach_board_reference_points(
     cam: Camera,
     pattern_size: tuple[int, int],
     reference_indices: np.ndarray,
+    round_index: int,
+    capture_count: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     window_name = "Camera"
     locked_corners: np.ndarray | None = None
     robot_points: list[np.ndarray] = []
     current_step = 0
-    print("请先固定棋盘格。按回车锁定当前棋盘位置，随后按提示依次示教各个角点。")
+    print(
+        f"请先固定棋盘格。第 {round_index + 1}/{capture_count} 轮：按回车锁定当前棋盘位置，随后按提示依次示教各个角点。"
+    )
 
     while current_step < len(reference_indices):
         frames = cam.get_frames()
@@ -359,6 +363,7 @@ def collect_board_correspondences(
     reference_indices_path: str,
     reference_robot_points_path: str,
     pattern_size: tuple[int, int],
+    capture_count: int,
 ):
     window_name = "Camera"
     cv2.namedWindow(window_name)
@@ -369,17 +374,35 @@ def collect_board_correspondences(
 
     try:
         reference_indices = select_teaching_corner_indices(pattern_size)
-        image_points, robot_points = teach_board_reference_points(
-            arm, cam, pattern_size, reference_indices
+        all_image_points: list[np.ndarray] = []
+        all_robot_points: list[np.ndarray] = []
+
+        for round_index in range(capture_count):
+            image_points, robot_points = teach_board_reference_points(
+                arm,
+                cam,
+                pattern_size,
+                reference_indices,
+                round_index,
+                capture_count,
+            )
+            all_image_points.append(image_points)
+            all_robot_points.append(robot_points)
+
+        merged_image_points = np.concatenate(all_image_points, axis=0).astype(
+            np.float32
+        )
+        merged_robot_points = np.concatenate(all_robot_points, axis=0).astype(
+            np.float32
         )
 
         homography_matrix, inlier_mask = calibrate_2d_from_correspondences(
-            image_points, robot_points
+            merged_image_points, merged_robot_points
         )
-        np.save(image_points_path, image_points)
-        np.save(robot_points_path, robot_points)
+        np.save(image_points_path, merged_image_points)
+        np.save(robot_points_path, merged_robot_points)
         np.save(reference_indices_path, reference_indices)
-        np.save(reference_robot_points_path, robot_points)
+        np.save(reference_robot_points_path, merged_robot_points)
         return image_points_path, robot_points_path, homography_matrix, inlier_mask
     finally:
         cv2.destroyAllWindows()
@@ -489,7 +512,7 @@ def main():
     argparser.add_argument(
         "--mode",
         type=str,
-        default="test",
+        default="calibrate",
         help="模式: calibrate 手动采集多点; calibrate_board 半自动采集多点; test 测试",
     )
     argparser.add_argument(
@@ -502,7 +525,7 @@ def main():
         "--capture-count",
         type=int,
         default=1,
-        help="保留参数，当前calibrate_board流程未使用",
+        help="calibrate_board模式下重复示教的轮数，多轮数据会拼接后共同拟合单应性矩阵",
     )
     args = argparser.parse_args()
 
@@ -543,6 +566,7 @@ def main():
             reference_indices_path,
             reference_robot_points_path,
             pattern_size,
+            args.capture_count,
         )
         np.save(homography_matrix_path, homography_matrix)
 
