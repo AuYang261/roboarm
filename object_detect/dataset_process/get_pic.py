@@ -7,6 +7,7 @@ sys.path.append(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 from camera.camera_api import Camera
+from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 
 def main():
@@ -23,8 +24,8 @@ def main():
         if frames.get("color") is None:
             print("Failed to grab frame")
             continue
-        cv2.imshow("Camera", frames["color"])
-        key = cv2.waitKey(1)
+        show_image("Camera", frames["color"])
+        key = poll_key(1)
         if key == ord("c") or key == ord(" "):  # 按 'c'/空格 键拍照
             while True:
                 img_name = os.path.join(dataset_path, f"img_{img_count:03d}.png")
@@ -38,7 +39,7 @@ def main():
             print("Exiting...")
             break
     cam.close()
-    cv2.destroyAllWindows()
+    destroy_all_windows()
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from config_getter import get_config_value
+from utils.config_getter import get_config_value
 from arm.arm_base import Arm
 import numpy as np
 from object_detect.detect import (
@@ -15,7 +15,7 @@ from camera.camera_api import Camera
 import cv2
 import time
 import concurrent.futures
-
+from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 def main():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -113,8 +113,8 @@ def main():
                 (0, 255, 0),
                 2,
             )
-            cv2.imshow("Detections", frame)
-            if cv2.waitKey(1) & 0xFF == 27:  # 按Esc键退出
+            show_image("Detections", frame)
+            if poll_key(1) & 0xFF == 27:  # 按Esc键退出
                 break
         except KeyboardInterrupt:
             print("Exiting...")
@@ -123,7 +123,7 @@ def main():
     time.sleep(1)
     arm.disconnect_arm()
     cam.close()
-    cv2.destroyAllWindows()
+    destroy_all_windows()
 
 
 if __name__ == "__main__":

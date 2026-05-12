@@ -14,8 +14,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from arm.arm_base import Arm
 import time
-from config_getter import get_config_value
-
+from utils.config_getter import get_config_value
 
 def main():
     arm_type = get_config_value("arm_type")

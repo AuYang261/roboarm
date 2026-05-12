@@ -3,8 +3,8 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import cv2
-from config_getter import get_config_value
-
+from utils.config_getter import get_config_value
+from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 class Camera:
 
@@ -59,18 +59,19 @@ def main():
 
     camera = Camera(color=True, depth=False)
 
-    frame_rgb, frame_depth = camera.get_frames()
+    frames = camera.get_frames()
+    frame_rgb = frames.get("color")
+    frame_depth = frames.get("depth")
 
-    cv2.namedWindow('Camera Client', cv2.WINDOW_NORMAL)
-    cv2.imshow('Camera Client', frame_rgb if frame_rgb is not None else frame_depth)
+    show_image("Camera Client", frame_rgb if frame_rgb is not None else frame_depth)
 
     print("Press 'q' to exit")
     while True:
-        key = cv2.waitKey(1)
+        key = poll_key(1)
         if key == ord('q'):
             break
 
-    cv2.destroyAllWindows()
+    destroy_all_windows()
 
 
 if __name__ == "__main__":

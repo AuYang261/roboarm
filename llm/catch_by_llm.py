@@ -4,7 +4,7 @@ import json
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.camera_api import Camera
-from config_getter import get_config_value
+from utils.config_getter import get_config_value
 from pydantic import TypeAdapter
 from llm.dataclass import DetectedBox, DetectedFromLLM
 from llm.audio2text import get_audio_text
@@ -18,6 +18,12 @@ from threading import Thread
 from typing import Callable, Optional
 
 from llm.llm_detect import LLMDetect, json2box, draw_boxes_on_frame
+from utils.cv2_display import (
+    show_image,
+    poll_key,
+    set_mouse_callback,
+    destroy_all_windows,
+)
 
 CATCH_STATS_FILE = os.path.join(os.path.dirname(__file__), "catch_stats.json")
 
@@ -78,8 +84,7 @@ def consumption_thread():
 
     box = None
     window_name = "Camera"
-    cv2.namedWindow(window_name)
-    cv2.setMouseCallback(window_name, mouse_callback)
+    set_mouse_callback(window_name, mouse_callback)
 
     while True:
         if not box_queue.empty():
@@ -90,9 +95,9 @@ def consumption_thread():
             boxes=[box] if box else [],
             frame=frame,
         )
-        cv2.imshow(winname=window_name, mat=frame_draw)
-        if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
-            cv2.destroyAllWindows()
+        show_image(window_name, frame_draw)
+        if poll_key(1) & 0xFF == 27:  # Press 'ESC' to exit
+            destroy_all_windows()
             arm.move_to_home()
             arm.disconnect_arm()
             break

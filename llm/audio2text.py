@@ -8,7 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import _thread as thread
 import time
 from unittest import result
-from config_getter import get_config_value
+from utils.config_getter import get_config_value
 from time import mktime
 import io
 from pydub import AudioSegment

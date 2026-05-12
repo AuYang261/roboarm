@@ -7,7 +7,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from typing import Union, List
 from collections.abc import Sequence
 from arm.arm_base import Arm
-from config_getter import get_config_value
+from utils.config_getter import get_config_value
 import time
 import numpy as np
 import piper_sdk
@@ -477,13 +477,15 @@ class PiperBySDK(Arm):
                 print(f"🚀 成功激活 {can_iface} ({usb_port})！\n")
                 ret.append(can_iface)
 
+            return ret
+
         except subprocess.CalledProcessError as e:
             print(f"❌ 运行 Shell 脚本时出错!")
             print(f"命令: {e.cmd}")
             print(f"错误输出: {e.stderr if e.stderr else '无详细错误信息'}")
         except Exception as e:
             print(f"❌ 发生未知错误: {e}")
-        return ret
+        return []
 
     def set_move_mode(self, move_mode_end_pose: bool):
         """切换机械臂控制模式。

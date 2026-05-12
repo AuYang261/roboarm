@@ -16,7 +16,7 @@ import numpy as np
 import kinpy
 from typing import Union, List
 from pathlib import Path
-from config_getter import get_config_value
+from utils.config_getter import get_config_value
 from collections.abc import Sequence
 from lerobot.robots.koch_follower import config_koch_follower, koch_follower
 

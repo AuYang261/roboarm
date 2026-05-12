@@ -7,7 +7,7 @@ from typing import cast
 
 import cv2
 import numpy as np
-from config_getter import get_config_value
+from utils.config_getter import get_config_value
 from scipy.spatial.transform import Rotation as R
 from typing_extensions import Self
 

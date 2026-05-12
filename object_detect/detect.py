@@ -6,9 +6,9 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from config_getter import get_config_value
+from utils.config_getter import get_config_value
 from camera.camera_api import Camera
-
+from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 def detect_objects_in_frame(model, frame, conf_thres=0.8, iou_thres=0.45):
     results = model(frame, conf=conf_thres, iou=iou_thres)[0]
@@ -95,11 +95,11 @@ def main():
             (0, 255, 0),
             2,
         )
-        cv2.imshow("YOLOv11-obb Object Detection", annotated_frame)
-        if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
+        show_image("YOLOv11-obb Object Detection", annotated_frame)
+        if poll_key(1) & 0xFF == 27:  # Press 'ESC' to exit
             break
     camera.close()
-    cv2.destroyAllWindows()
+    destroy_all_windows()
 
 
 if __name__ == "__main__":

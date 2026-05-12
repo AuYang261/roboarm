@@ -113,7 +113,7 @@ def main():
     try:
         sys.path.append(os.path.dirname(os.path.dirname(__file__)))
         from camera.camera_api import Camera
-        import cv2
+        from utils.cv2_display import show_image, poll_key
         camera = Camera(color=True, depth=False)
         print("成功导入 camera 模块，开始视频采集")
         # 创建一个线程来处理摄像头输入
@@ -125,8 +125,8 @@ def main():
                     print("Failed to grab frame")
                     continue
                 # 显示图像
-                cv2.imshow("Leader Follower Camera", frames["color"])
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                show_image("Leader Follower Camera", frames["color"])
+                if poll_key(1) & 0xFF == ord('q'):
                     follower_arm_right.disable_torque()
                     follower_arm_right.disconnect()
                     leader_arm_left.disable_torque()

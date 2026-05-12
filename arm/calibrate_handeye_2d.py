@@ -10,7 +10,13 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.camera_api import Camera
-from config_getter import get_config_value
+from utils.config_getter import get_config_value
+from utils.cv2_display import (
+    show_image,
+    poll_key,
+    set_mouse_callback,
+    destroy_all_windows,
+)
 from arm.arm_base import Arm
 import argparse
 import cv2
@@ -176,8 +182,7 @@ def collect_image_pose(image_points_path, end_poses_path):
             print(f"选择图片点: ({x}, {y})，将机械臂移动到该点后按空格记录。")
 
     window_name = "Camera"
-    cv2.namedWindow(window_name)
-    cv2.setMouseCallback(window_name, mouse_callback)
+    set_mouse_callback(window_name, mouse_callback)
 
     arm = Arm()
     arm.disable_torque()
@@ -202,9 +207,9 @@ def collect_image_pose(image_points_path, end_poses_path):
                 (0, 255, 0),
                 2,
             )
-            cv2.imshow(window_name, image_to_show)
+            show_image(window_name, image_to_show)
 
-            key = cv2.waitKey(1)
+            key = poll_key(1)
             if key == 27:
                 break
             if key == ord(" "):
@@ -228,9 +233,7 @@ def collect_image_pose(image_points_path, end_poses_path):
                 selected_point = None
         except KeyboardInterrupt:
             break
-    cv2.destroyAllWindows()
-    cam.close()
-    arm.disconnect_arm()
+    destroy_all_windows()
 
     np.save(image_points_path, np.array(image_points, dtype=np.float32))
     np.save(end_poses_path, np.array(end_poses, dtype=np.float32))
@@ -287,9 +290,9 @@ def teach_board_reference_points(
                 (0, 255, 0),
                 2,
             )
-            cv2.imshow(window_name, image_to_show)
+            show_image(window_name, image_to_show)
 
-            key = cv2.waitKey(1)
+            key = poll_key(1)
             if key == 27:
                 raise KeyboardInterrupt
             if key != 13:
@@ -325,9 +328,9 @@ def teach_board_reference_points(
             (0, 255, 255),
             2,
         )
-        cv2.imshow(window_name, image_to_show)
+        show_image(window_name, image_to_show)
 
-        key = cv2.waitKey(1)
+        key = poll_key(1)
         if key == 27:
             raise KeyboardInterrupt
         if key == 13:
@@ -366,7 +369,6 @@ def collect_board_correspondences(
     capture_count: int,
 ):
     window_name = "Camera"
-    cv2.namedWindow(window_name)
 
     arm = Arm()
     arm.disable_torque()
@@ -405,7 +407,7 @@ def collect_board_correspondences(
         np.save(reference_robot_points_path, merged_robot_points)
         return image_points_path, robot_points_path, homography_matrix, inlier_mask
     finally:
-        cv2.destroyAllWindows()
+        destroy_all_windows()
         cam.close()
         arm.disconnect_arm()
 
@@ -480,8 +482,7 @@ def test_handeye_2d(homography_matrix):
             ).start()
 
     window_name = "Camera"
-    cv2.namedWindow(window_name)
-    cv2.setMouseCallback(window_name, mouse_callback)
+    set_mouse_callback(window_name, mouse_callback)
 
     cam = Camera(color=True, depth=False)
     while True:
@@ -492,16 +493,16 @@ def test_handeye_2d(homography_matrix):
                 print("failed to get color image")
                 time.sleep(0.5)
                 continue
-            cv2.imshow(window_name, color_image)
+            show_image(window_name, color_image)
 
-            key = cv2.waitKey(1)
+            key = poll_key(1)
             if key == 27:
                 break
 
         except KeyboardInterrupt:
             break
 
-    cv2.destroyAllWindows()
+    destroy_all_windows()
     cam.close()
 
     arm.disconnect_arm()

@@ -265,8 +265,8 @@ def collect_image_pose():
             if color_image is None:
                 print("failed to get color image")
                 continue
-            cv2.imshow("Color Viewer", color_image)
-            key = cv2.waitKey(1)
+            show_image("Color Viewer", color_image)
+            key = poll_key(1)
             if key == 27:
                 break
             elif key == ord(" "):
@@ -289,7 +289,7 @@ def collect_image_pose():
         except KeyboardInterrupt:
             break
     data.save(pose_path)
-    cv2.destroyAllWindows()
+    destroy_all_windows()
     cam.close()
     arm.disconnect_arm()
 

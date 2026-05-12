@@ -3,7 +3,7 @@ import sys
 import subprocess
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from config_getter import get_config_value
+from utils.config_getter import get_config_value
 from openai.types.chat.chat_completion import ChatCompletion
 from openai import OpenAI, AsyncOpenAI
 import base64
@@ -20,6 +20,7 @@ import threading
 from concurrent import futures
 
 from llm.dataclass import DetectedFromLLM
+from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 
 def _load_cjk_font(size: int = 16) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -313,6 +314,7 @@ if __name__ == "__main__":
         draw.rectangle([x1, y1, x2, y2], outline="red", width=2)
         draw.text((x1, y1 - 20), label, fill="red", font=font)
 
-    cv2.imshow("result", cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR))
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    show_image("result", cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR))
+    while poll_key(0) == -1:
+        pass
+    destroy_all_windows()
