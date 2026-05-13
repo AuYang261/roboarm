@@ -3,7 +3,7 @@
 import os
 import yaml
 from typing import Any
-
+from pathlib import Path
 
 def load_config(config_file: str) -> dict:
     """
@@ -19,7 +19,7 @@ def load_config(config_file: str) -> dict:
     return config
 
 
-CONFIG = load_config(os.path.join(os.path.dirname(__file__), "config.yaml"))
+CONFIG = load_config((Path(__file__).parent.parent / "config.yaml").as_posix())
 
 
 def get_config_value(key: str, default=None, raise_if_missing: bool = True) -> Any:
