@@ -3,8 +3,8 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from arm.arm_control import Arm
-from config_getter import get_config_value
+from arm.arm_base import Arm
+from utils.config_getter import get_config_value
 import numpy as np
 from object_detect.detect import (
     detect_objects_in_frame,
@@ -15,7 +15,7 @@ from camera.camera_api import Camera
 import cv2
 import time
 import concurrent.futures
-
+from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 def main():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -23,14 +23,16 @@ def main():
         os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
         for path in get_config_value("classification_YOLO_model_path", [])
     ]
-    default_gripper_aside_pos = get_config_value("default_gripper_aside_pos")
+    default_gripper_aside_pos = get_config_value(
+        "default_gripper_aside_pos", raise_if_missing=False
+    )
     default_conf_thres = get_config_value("default_conf_thres")
     class_pos = get_config_value("class_pos")
     place_distance_threshold = get_config_value("place_distance_threshold")
     offset = get_config_value("catch_offset")
 
     arm = Arm()
-    arm.move_to_home(gripper_angle_deg=80)
+    arm.move_to_home(gripper_open_0to1=1)
     cam = Camera(color=True, depth=False)
     models = [load_model(model_path) for model_path in model_paths]
     detections = []
@@ -64,7 +66,11 @@ def main():
                     )
                     if (
                         np.linalg.norm(
-                            np.array(class_pos.get(class_name, [-0.2, 0.0]))
+                            np.array(
+                                class_pos.get(class_name, {"pos": [-0.2, 0.0]}).get(
+                                    "pos"
+                                )
+                            )
                             - np.array([target_x, target_y])
                         )
                         < place_distance_threshold
@@ -79,16 +85,16 @@ def main():
                             target_x + offset * np.cos(gripper_angle_rad),
                             target_y + offset * np.sin(-gripper_angle_rad),
                             gripper_angle_rad,
-                            class_pos.get(class_name, [-0.2, 0.0]),
+                            class_pos.get(class_name, {"pos": [-0.2, 0.0]}).get("pos"),
                         )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 
-            if future is None or future.done():
+            if default_gripper_aside_pos and (future is None or future.done()):
                 # 移到旁边以免挡住视野
                 future = executor.submit(
                     arm.move_to,
                     default_gripper_aside_pos,
-                    80,
+                    1,
                 )
             end_time = time.time()
             if end_time - start_time == 0:
@@ -104,17 +110,18 @@ def main():
                 (0, 255, 0),
                 2,
             )
-            cv2.imshow("Detections", frame)
-            if cv2.waitKey(1) & 0xFF == 27:  # 按Esc键退出
+            show_image("Detections", frame)
+            if poll_key(1) & 0xFF == 27:  # 按Esc键退出
                 break
         except KeyboardInterrupt:
             print("Exiting...")
+            break
 
-    arm.move_to_home(gripper_angle_deg=80)
+    arm.move_to_home(gripper_open_0to1=1)
     time.sleep(1)
     arm.disconnect_arm()
     cam.close()
-    cv2.destroyAllWindows()
+    destroy_all_windows()
 
 
 if __name__ == "__main__":

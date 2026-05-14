@@ -5,7 +5,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.camera_api import Camera
-from arm.arm_control import Arm
+from arm.arm_base import Arm
 import cv2
 import xlrd2, xlwt
 from math import cos, sin, pi
@@ -233,6 +233,7 @@ def collect_image_pose():
                 os.path.dirname(__file__),
                 "..",
                 "urdf",
+                "lerobo",
                 "low_cost_robot.urdf",
             )
         ).read()
@@ -264,8 +265,8 @@ def collect_image_pose():
             if color_image is None:
                 print("failed to get color image")
                 continue
-            cv2.imshow("Color Viewer", color_image)
-            key = cv2.waitKey(1)
+            show_image("Color Viewer", color_image)
+            key = poll_key(1)
             if key == 27:
                 break
             elif key == ord(" "):
@@ -288,7 +289,7 @@ def collect_image_pose():
         except KeyboardInterrupt:
             break
     data.save(pose_path)
-    cv2.destroyAllWindows()
+    destroy_all_windows()
     cam.close()
     arm.disconnect_arm()
 

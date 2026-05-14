@@ -17,7 +17,7 @@ import mujoco.viewer
 from datetime import datetime
 
 # Windows 上 select 不支持 stdin，使用 msvcrt
-if platform.system() == 'Windows':
+if platform.system() == "Windows":
     import msvcrt
 else:
     import select
@@ -26,7 +26,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 from sim.mujoco_sim import SimMujocoModel, action2rad, _apply_pd_control
 
 
-def step_towards(current, target, step_size = 10) -> dict:
+def step_towards(current, target, step_size=10) -> dict:
     result = {}
     for key in target.keys():
         curr_value = current[key]
@@ -38,12 +38,13 @@ def step_towards(current, target, step_size = 10) -> dict:
                 result[key] = curr_value + step_size
             else:
                 result[key] = curr_value - step_size
-    return result   
-    
+    return result
+
 
 DISABLE_TIME = 300
 TOP_CAM_IDX = 4
 ARM_CAM_IDX = 2
+
 
 def main():
     parser = argparse.ArgumentParser(description="Leader-Follower Control")
@@ -166,10 +167,20 @@ def main():
 
     # 初始化 MuJoCo 仿真
     if args.enable_sim:
-        model_path = os.path.join(os.path.dirname(__file__), '..', 'urdf', 'meshes', 'mjmodel_opt.xml')
+        model_path = os.path.join(
+            os.path.dirname(__file__), "..", "urdf", "meshes", "mjmodel_opt.xml"
+        )
         sim = SimMujocoModel(model_path)
-        sim.add_view('default', {'distance': 3.0, 'lookat': [0.0, 0.0, 0.0], 'elevation': -20.0, 'azimuth': 135.0})
-        sim.switch_view('default')
+        sim.add_view(
+            "default",
+            {
+                "distance": 3.0,
+                "lookat": [0.0, 0.0, 0.0],
+                "elevation": -20.0,
+                "azimuth": 135.0,
+            },
+        )
+        sim.switch_view("default")
 
         # 创建离屏渲染器
         render_w, render_h = 640, 480
@@ -187,23 +198,32 @@ def main():
         follow_cam = mujoco.MjvCamera()
         follow_cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
         follow_cam.fixedcamid = mujoco.mj_name2id(
-            sim.model, mujoco.mjtObj.mjOBJ_CAMERA, "gripper_cam")
+            sim.model, mujoco.mjtObj.mjOBJ_CAMERA, "gripper_cam"
+        )
 
         if args.record:
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            video_writers['sim_top'] = cv2.VideoWriter(
-                os.path.join(output_path, 'sim_top.mp4'), fourcc, frequency, (render_w, render_h))
-            video_writers['sim_follow'] = cv2.VideoWriter(
-                os.path.join(output_path, 'sim_follow.mp4'), fourcc, frequency, (render_w, render_h))
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            video_writers["sim_top"] = cv2.VideoWriter(
+                os.path.join(output_path, "sim_top.mp4"),
+                fourcc,
+                frequency,
+                (render_w, render_h),
+            )
+            video_writers["sim_follow"] = cv2.VideoWriter(
+                os.path.join(output_path, "sim_follow.mp4"),
+                fourcc,
+                frequency,
+                (render_w, render_h),
+            )
 
     # 初始化真实相机
     camera_top = None
     camera_arm = None
     if args.enable_camera:
         """
-            直接使用 opencv 的 VideoCapture 来读取相机数据，减少依赖和复杂度
-            'index': 4, 'name': 'USB 视频设备'
-            'index': 0, 'name': 'Orbbec Gemini 215 RGB Camera'
+        直接使用 opencv 的 VideoCapture 来读取相机数据，减少依赖和复杂度
+        'index': 4, 'name': 'USB 视频设备'
+        'index': 0, 'name': 'Orbbec Gemini 215 RGB Camera'
         """
         try:
             # 尝试打开顶部相机 (Orbbec Gemini 215 RGB Camera, index 0)
@@ -215,9 +235,13 @@ def main():
                 print("顶部相机初始化成功 (index 0)")
 
                 if args.record:
-                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                    video_writers['camera_top'] = cv2.VideoWriter(
-                        os.path.join(output_path, 'camera_top.mp4'), fourcc, frequency, (640, 480))
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    video_writers["camera_top"] = cv2.VideoWriter(
+                        os.path.join(output_path, "camera_top.mp4"),
+                        fourcc,
+                        frequency,
+                        (640, 480),
+                    )
             else:
                 print("顶部相机初始化失败 (index 4)")
                 camera_top = None
@@ -235,9 +259,13 @@ def main():
                 print("手臂相机初始化成功 (index 2)")
 
                 if args.record:
-                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                    video_writers['camera_arm'] = cv2.VideoWriter(
-                        os.path.join(output_path, 'camera_arm.mp4'), fourcc, frequency, (640, 480))
+                    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+                    video_writers["camera_arm"] = cv2.VideoWriter(
+                        os.path.join(output_path, "camera_arm.mp4"),
+                        fourcc,
+                        frequency,
+                        (640, 480),
+                    )
             else:
                 print("手臂相机初始化失败 (index 4)")
                 camera_arm = None
@@ -245,12 +273,10 @@ def main():
             print(f"手臂相机初始化失败: {e}")
             camera_arm = None
 
-
     print("开始运行 Leader-Follower 控制...")
     print("按 'q' + Enter 退出")
 
     start_time = time.time()
-    
 
     for frame_idx in range(seconds * frequency):
         # 使用正确的键名 "left" 和 "right"
@@ -258,17 +284,23 @@ def main():
             leader_pos_left = {}
             follow_pos_right = {}
             for motor in leader_arm_left.motors.keys():
-                leader_pos_left[motor] = leader_arm_left.read("Present_Position", motor=motor)
+                leader_pos_left[motor] = leader_arm_left.read(
+                    "Present_Position", motor=motor
+                )
 
             if enable_flag:
                 for motor in follower_arm_right.motors.keys():
-                    follow_pos_right[motor] = follower_arm_right.read("Present_Position", motor=motor)
-                target_pos = step_towards(follow_pos_right, leader_pos_left, step_size=10)
+                    follow_pos_right[motor] = follower_arm_right.read(
+                        "Present_Position", motor=motor
+                    )
+                target_pos = step_towards(
+                    follow_pos_right, leader_pos_left, step_size=10
+                )
                 # 将 leader 的位置发送到 follower
                 for motor, leader_pos in target_pos.items():
                     follower_arm_right.write("Goal_Position", motor, leader_pos)
 
-            if enable_flag and DISABLE_TIME > 0 and DISABLE_TIME < frame_idx :
+            if enable_flag and DISABLE_TIME > 0 and DISABLE_TIME < frame_idx:
                 print("disable torque")
                 follower_arm_right.disable_torque()
                 enable_flag = False
@@ -285,12 +317,14 @@ def main():
                     leader_pos_left.get("wrist_roll", 0),
                     leader_pos_left.get("gripper", 0),
                 ]
-                trajectory_data.append({
-                    'timestamp': current_time,
-                    'action': action_list,
-                    'leader_pos': leader_pos_left,
-                    'follower_pos': follow_pos_right,
-                })
+                trajectory_data.append(
+                    {
+                        "timestamp": current_time,
+                        "action": action_list,
+                        "leader_pos": leader_pos_left,
+                        "follower_pos": follow_pos_right,
+                    }
+                )
 
             # 更新 MuJoCo 仿真
             if args.enable_sim and sim is not None:
@@ -303,7 +337,9 @@ def main():
                     leader_pos_left.get("wrist_roll", 0),
                     leader_pos_left.get("gripper", 0),
                 ]
-                rad_angles = action2rad(action_list, calibration_file=args.calibration_left_path)
+                rad_angles = action2rad(
+                    action_list, calibration_file=args.calibration_left_path
+                )
                 sim.set_joint_angles(rad_angles)
 
                 sim.update_camera()
@@ -317,14 +353,14 @@ def main():
                     renderer.update_scene(sim.data, top_cam)
                     top_img = renderer.render()
                     top_img_bgr = cv2.cvtColor(top_img, cv2.COLOR_RGB2BGR)
-                    video_writers['sim_top'].write(top_img_bgr)
+                    video_writers["sim_top"].write(top_img_bgr)
                     cv2.imshow("Sim Top View", top_img_bgr)
 
                     # Follow 视角
                     renderer.update_scene(sim.data, follow_cam)
                     follow_img = renderer.render()
                     follow_img_bgr = cv2.cvtColor(follow_img, cv2.COLOR_RGB2BGR)
-                    video_writers['sim_follow'].write(follow_img_bgr)
+                    video_writers["sim_follow"].write(follow_img_bgr)
                     cv2.imshow("Sim Follow View", follow_img_bgr)
 
             # 采集并录制真实相机画面
@@ -335,7 +371,7 @@ def main():
                     if ret and frame_top is not None:
                         cv2.imshow("Camera Top", frame_top)
                         if args.record:
-                            video_writers['camera_top'].write(frame_top)
+                            video_writers["camera_top"].write(frame_top)
 
                 # 手臂相机
                 if camera_arm is not None and camera_arm.isOpened():
@@ -343,7 +379,7 @@ def main():
                     if ret and frame_arm is not None:
                         cv2.imshow("Camera Arm", frame_arm)
                         if args.record:
-                            video_writers['camera_arm'].write(frame_arm)
+                            video_writers["camera_arm"].write(frame_arm)
 
             # 确保不会在过高频率下运行，可以加入一些延迟
             time.sleep(1 / frequency)
@@ -353,7 +389,6 @@ def main():
                 print("ESC pressed, exiting...")
                 break
 
-           
         except Exception as e:
             print(f"Error in control loop: {e}")
             pass
@@ -363,11 +398,11 @@ def main():
         print("\n正在保存录制数据...")
 
         # 保存轨迹数据为 JSONL 格式
-        trajectory_file = os.path.join(output_path, 'trajectory.jsonl')
-        with open(trajectory_file, 'w', encoding='utf-8') as f:
+        trajectory_file = os.path.join(output_path, "trajectory.jsonl")
+        with open(trajectory_file, "w", encoding="utf-8") as f:
             for entry in trajectory_data:
                 json.dump(entry, f)
-                f.write('\n')
+                f.write("\n")
         print(f"轨迹数据已保存: {trajectory_file} ({len(trajectory_data)} 帧)")
 
         # 释放所有视频写入器
@@ -403,5 +438,5 @@ def main():
 
 
 if __name__ == "__main__":
-    
+
     main()

@@ -388,7 +388,7 @@ def test_video():
     import sys
     import os
     sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-    from config_getter import get_config_value
+    from utils.config_getter import get_config_value
 
     model_paths = [
         os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
@@ -406,11 +406,13 @@ def test_video():
 
     # Open camera
     from camera.camera_api import Camera
+    from utils.cv2_display import show_image, poll_key, destroy_all_windows
     camera = Camera(color=True, depth=False)
 
     while True:
         frames = camera.get_frames()
-        if frames.get("color") is None:
+        color_frame = frames.get("color")
+        if color_frame is None:
             print("Failed to grab frame")
             continue
 
@@ -419,10 +421,10 @@ def test_video():
         # Perform inference
         results = detect_objects_in_frame(
             model,
-            frames["color"],
+            color_frame,
             conf_thres=default_conf_thres,
         )
-        annotated_frame = frames["color"].copy()
+        annotated_frame = color_frame.copy()
         for (x, y, w, h, r), score, class_id, class_name in results:
             draw_box(
                 annotated_frame,
@@ -444,11 +446,11 @@ def test_video():
             (0, 255, 0),
             2,
         )
-        cv2.imshow("YOLOv11-obb Object Detection (RKNN)", annotated_frame)
-        if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
+        show_image("YOLOv11-obb Object Detection (RKNN)", annotated_frame)
+        if poll_key(1) & 0xFF == 27:  # Press 'ESC' to exit
             break
     camera.close()
-    cv2.destroyAllWindows()
+    destroy_all_windows()
     model.release()
 
 if __name__ == '__main__':

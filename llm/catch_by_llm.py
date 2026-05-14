@@ -4,20 +4,26 @@ import json
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.camera_api import Camera
-from config_getter import get_config_value
+from utils.config_getter import get_config_value
 from pydantic import TypeAdapter
-from llm.dataclass import DetectedFromLLM
+from llm.dataclass import DetectedBox, DetectedFromLLM
 from llm.audio2text import get_audio_text
 import cv2
 import numpy as np
 import concurrent.futures
 import time
 from queue import Queue
-from arm.arm_control import Arm
+from arm.arm_base import Arm
 from threading import Thread
 from typing import Callable, Optional
 
 from llm.llm_detect import LLMDetect, json2box, draw_boxes_on_frame
+from utils.cv2_display import (
+    show_image,
+    poll_key,
+    set_mouse_callback,
+    destroy_all_windows,
+)
 
 CATCH_STATS_FILE = os.path.join(os.path.dirname(__file__), "catch_stats.json")
 
@@ -57,7 +63,29 @@ frame = None
 
 def consumption_thread():
     global frame, box_queue
+    idx = 0
+
+    def mouse_callback(event, x, y, flags, param):
+        nonlocal idx
+        if event == cv2.EVENT_LBUTTONDOWN:
+            print(f"Left button clicked at ({x}, {y})")
+            # 手动点击目标，替换大模型识别结果，可靠性要求高的时候启用
+            # names = "8周年快乐"
+            # box_queue.put(
+            #     DetectedBox(
+            #         class_name=names[idx],
+            #         box_center_x=x,
+            #         box_center_y=y,
+            #         box_width=100,
+            #         box_height=150,
+            #     )
+            # )
+            # idx += 1
+
     box = None
+    window_name = "Camera"
+    set_mouse_callback(window_name, mouse_callback)
+
     while True:
         if not box_queue.empty():
             box = box_queue.get(block=False)
@@ -67,9 +95,10 @@ def consumption_thread():
             boxes=[box] if box else [],
             frame=frame,
         )
-        cv2.imshow("LLM Detection", frame_draw)
-        if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
-            cv2.destroyAllWindows()
+        show_image(window_name, frame_draw)
+        if poll_key(1) & 0xFF == 27:  # Press 'ESC' to exit
+            destroy_all_windows()
+            arm.move_to_home()
             arm.disconnect_arm()
             break
 
@@ -131,8 +160,11 @@ def catch_by_instruction(
         print("Instruction:", instruction)
         class_pos = get_config_value("class_pos")
         offset = get_config_value("catch_offset")
-        default_gripper_aside_pos = get_config_value("default_gripper_aside_pos")
-        arm.move_to(default_gripper_aside_pos, 80)
+        default_gripper_aside_pos = get_config_value(
+            "default_gripper_aside_pos", raise_if_missing=False
+        )
+        if default_gripper_aside_pos is not None:
+            arm.move_to(default_gripper_aside_pos)
         time.sleep(0.5)
         print("LLM Detecting...")
         start = time.time()
@@ -153,6 +185,8 @@ def catch_by_instruction(
                     box = json2box(response, img_w=frame.shape[1], img_h=frame.shape[0])
                     print("检测到的目标:", box)
                     if box:
+                        # 手动点击目标，替换大模型识别结果，可靠性要求高的时候启用
+                        # box = queue_output.get(block=True)
                         queue_output.put(box)
                         # 将图像坐标转换为机械臂坐标系
                         target_x, target_y = arm.pixel2pos(
@@ -166,25 +200,21 @@ def catch_by_instruction(
                             box.box_height,
                             box.box_rotation_deg,
                         )
-                        if "红" in box.class_name or "red" in box.class_name.lower():
-                            print("红色积木，放置到红色区域")
-                            place_pos = class_pos.get("red_block")
-                        elif (
-                            "黄" in box.class_name or "yellow" in box.class_name.lower()
-                        ):
-                            print("黄色积木，放置到黄色区域")
-                            place_pos = class_pos.get("yellow_block")
-                        elif "蓝" in box.class_name or "blue" in box.class_name.lower():
-                            print("蓝色积木，放置到蓝色区域")
-                            place_pos = class_pos.get("blue_block")
-                        elif (
-                            "绿" in box.class_name or "green" in box.class_name.lower()
-                        ):
-                            print("绿色积木，放置到绿色区域")
-                            place_pos = class_pos.get("green_block")
-                        else:
+                        found = False
+                        place_pos = [0.1, 0.0]
+                        class_name = ""
+                        for name, pos in class_pos.items():
+                            for keyword in pos.get("keywords", []):
+                                if keyword in box.class_name.lower():
+                                    print(f"放置到'{name}'区域")
+                                    place_pos = pos.get("pos", place_pos)
+                                    found = True
+                                    class_name = name
+                                    break
+                            if found:
+                                break
+                        if not found:
                             print("未知积木，放置到默认区域")
-                            place_pos = class_pos.get("blue_block")
                         catch_success = arm.catch_and_place(
                             target_x + offset * np.cos(gripper_angle_rad),
                             target_y + offset * np.sin(-gripper_angle_rad),
@@ -206,10 +236,6 @@ def catch_by_text_instruction():
     global frame, box_queue
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     instructions = [
-        # "抓取蓝色积木",
-        # "抓取黄色积木",
-        # "抓取红色积木",
-        # "抓取绿色积木",
         "抓取最近的积木",
         "抓取红色积木",
         "抓取最右边的红色积木",
@@ -230,8 +256,8 @@ def catch_by_text_instruction():
             continue
         if future is None or future.done():
             if len(instructions) > 0:
-                # instruction = instructions[0]
-                instruction = instructions[np.random.randint(0, len(instructions))]
+                instruction = instructions[0]
+                # instruction = instructions[np.random.randint(0, len(instructions))]
                 future = executor.submit(
                     catch_by_instruction,
                     frame,
@@ -240,16 +266,19 @@ def catch_by_text_instruction():
                     lambda: instructions.remove(instruction),
                 )
             else:
-                future = executor.submit(
-                    arm.move_to,
-                    get_config_value("default_gripper_aside_pos"),
+                default_gripper_aside_pos = get_config_value(
+                    "default_gripper_aside_pos", raise_if_missing=False
                 )
+                if default_gripper_aside_pos is not None:
+                    future = executor.submit(
+                        arm.move_to,
+                        default_gripper_aside_pos,
+                    )
         if not thread.is_alive():
             break
     cam.close()
-    exit(0)
 
 
 if __name__ == "__main__":
-    # catch_by_text_instruction()
-    catch_by_audio()
+    catch_by_text_instruction()
+    # catch_by_audio()

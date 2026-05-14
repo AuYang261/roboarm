@@ -4,12 +4,9 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "lerobot", "src"))
 from lerobot.motors.dynamixel import DynamixelMotorsBus
 from lerobot.motors import Motor, MotorCalibration, MotorNormMode
-import tqdm
 import time
 import json
-import select
 import argparse
-import yaml
 
 CALIBRATION_FILE = "calibration/koch_follower.json"
 # CALIBRATION_FILE = "calibration/koch_follower_2.json"

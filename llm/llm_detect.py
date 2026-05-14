@@ -2,13 +2,14 @@ import os
 import sys
 import json
 import time
+from utils.cv2_display import show_image, poll_key
 import threading
 from collections import Counter
 from types import SimpleNamespace
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.camera_api import Camera
-from config_getter import get_config_value
+from utils.config_getter import get_config_value
 import cv2
 from PIL import Image, ImageDraw
 from pydantic import TypeAdapter
@@ -284,8 +285,8 @@ if __name__ == "__main__":
                     )
                 elif frame_draw is None:
                     frame_draw = frame
-                cv2.imshow("LLM Detection", frame_draw)
-                if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
+                show_image("LLM Detection", frame_draw)
+                if poll_key(1) & 0xFF == 27:  # Press 'ESC' to exit
                     exit()
                 if done:
                     break

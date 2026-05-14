@@ -21,7 +21,7 @@ from datetime import datetime
 
 # 添加项目路径
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from arm.arm_control import Arm
+from arm.arm_base import Arm
 from camera.camera_api import Camera
 import kinpy
 
@@ -61,10 +61,7 @@ class CoordinateComparator:
         # 加载URDF模型
         if urdf_path is None:
             urdf_path = os.path.join(
-                os.path.dirname(__file__),
-                "..",
-                "urdf",
-                "low_cost_robot.urdf"
+                os.path.dirname(__file__), "..", "urdf", "lerobo", "low_cost_robot.urdf"
             )
 
         with open(urdf_path, 'r', encoding='utf-8') as f:
@@ -147,7 +144,6 @@ class CoordinateComparator:
 
         # 创建图像窗口
         window_name = "Coordinate Comparison - Click Points"
-        cv2.namedWindow(window_name)
 
         # 鼠标回调函数
         clicked_point = None
@@ -162,9 +158,8 @@ class CoordinateComparator:
                 fk_result = self.forward_kinematics_from_joint_angles(joint_angles)
                 print(f"  正运动学位姿: {fk_result['position']}")
                 print(f"  夹爪角度: {gripper_state}")
-            
 
-        cv2.setMouseCallback(window_name, mouse_callback)
+        set_mouse_callback(window_name, mouse_callback)
 
         while points_collected < num_points:
             try:
@@ -185,9 +180,9 @@ class CoordinateComparator:
                                (clicked_point[0] + 10, clicked_point[1] - 10),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-                cv2.imshow(window_name, display_image)
+                show_image(window_name, display_image)
 
-                key = cv2.waitKey(1)
+                key = poll_key(1)
 
                 if key == 27:  # ESC键
                     print("采集结束")
@@ -231,7 +226,7 @@ class CoordinateComparator:
             except KeyboardInterrupt:
                 break
 
-        cv2.destroyAllWindows()
+        destroy_all_windows()
         return comparison_data
 
     def calculate_errors(self, comparison_data: List[Dict]) -> Dict:

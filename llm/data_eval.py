@@ -120,6 +120,8 @@ async def testcase_pic_llm_detect(
     IOU为-inf表示LLM检测失败，不计入统计
     """
     pic = cv2.imread(pic_path.as_posix())
+    if pic is None:
+        return -inf, "", None
     llm_detect = LLMDetect()
     instruction = await asyncio.to_thread(audio_file2text_wrapper, instruct_audio)
     response_task = llm_detect.detect_frame(

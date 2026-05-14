@@ -1,4 +1,4 @@
-
+# lerobo机械臂为COM*，piper机械臂为can*
 arm_port: COM3
 arm_offset:
   - 0
@@ -7,11 +7,17 @@ arm_offset:
   - -50
   - 0
 
+# 机械臂类型，lerobo或piper
+arm_type: lerobo
+
 # 不用远程摄像头则置空
 camera_ip: 
 camera_port: 8083
 
-# 默认桌面高度，即在机械臂坐标系下桌面的z坐标，单位米
+# headless 预览服务端口，若在无图形化环境运行，则显示的图片通过此端口启动为一个网络服务
+cv2_headless_port: 8765
+
+# 默认桌面高度，即在机械臂坐标系下桌面的z坐标，通常是实测出来的，单位米
 default_desktop_height: 0.075
 
 # 抓取动作间的停顿时间，单位秒
@@ -33,8 +39,8 @@ default_gripper_aside_pos:
 # llm_base_url: https://api.ohmygpt.com/v1
 llm_base_url: http://192.168.0.19:8001/v1
 
-# 大模型平台的api_key，本地部署则不需要
-llm_api_key: ****
+# 大模型平台的api_key，本地部署则随便填，但不要为空
+llm_api_key: any
 
 # 提示词文件
 prompts_file: prompts.toml
@@ -74,22 +80,32 @@ APIKey:
 
 # 以项目根目录为基准
 classification_YOLO_model_path:
-  - classification\object_detect\runs\积木方块\best.pt
+  - object_detect/runs/积木方块/best.pt
 
 # 默认YOLO识别置信度阈值
 default_conf_thres: 0.85
 
-# 夹爪闭合角度阈值，小于该值认为夹取失败，单位度
-default_gripper_close_threshold: 3
+# 夹爪闭合阈值，小于该值认为夹取失败，范围是[0,1]，越大越开，1表示完全张开（不是角度）
+default_gripper_close_threshold: 0.05
 
 # 各类别放置位置，(x,y)，单位米
+# keywords表示大模型输出的标签中含有其中某个关键词即认为是这个类别
 class_pos:
   blue_block:
-    - 0.2
-    - 0
+    pos:
+      - 0.2
+      - 0
+    keywords:
+      - 'blue'
+      - '蓝'
   white_block:
-    - -0.2
-    - 0
+    pos:
+      - -0.2
+      - 0
+    keywords:
+      - 'white'
+      - '白'
+
 
 # 离放置位置多近时无需抓取，以免反复抓放，单位米
 place_distance_threshold: 0.05
@@ -102,6 +118,9 @@ catch_raise_height: 0.1
 
 # 放置前抬起的高度，单位米
 place_raise_height: 0.1
+
+# 放置时是否先下降再松开夹爪，默认否
+go_down_before_open_gripper_in_place: False
 
 # =======主从臂跟随场景=======
 

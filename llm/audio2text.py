@@ -8,7 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import _thread as thread
 import time
 from unittest import result
-from config_getter import get_config_value
+from utils.config_getter import get_config_value
 from time import mktime
 import io
 from pydub import AudioSegment
@@ -24,13 +24,25 @@ import ssl
 from datetime import datetime
 from urllib.parse import urlencode
 from wsgiref.handlers import format_date_time
-import sounddevice as sd
+
+try:
+    import sounddevice as sd
+except Exception as e:
+    print(e)
+    print("Import sounddevice error.")
+    print("Try 'sudo apt install portaudio19-dev'. Or no audio input device.")
 import wave
 import requests
+from pathlib import Path
 
 STATUS_FIRST_FRAME = 0  # 第一帧的标识
 STATUS_CONTINUE_FRAME = 1  # 中间帧标识
 STATUS_LAST_FRAME = 2  # 最后一帧的标识
+
+https_proxy = get_config_value("https_proxy", None, False)
+if https_proxy is not None and https_proxy != "":
+    os.environ["http_proxy"] = https_proxy
+    os.environ["https_proxy"] = https_proxy
 
 
 def deprecated(func):
@@ -389,7 +401,7 @@ def _whisper_transcribe(audio_path: str) -> str:
     password = get_config_value("whisper_password")
 
     session = requests.Session()
-    session.trust_env = False  # 不使用系统代理，避免局域网请求走代理
+    # session.trust_env = False  # 不使用系统代理，避免局域网请求走代理
     # 登录获取 session cookie
     if username:
         resp = session.post(
@@ -467,31 +479,14 @@ def _xfyun_transcribe(audio_path: str) -> str:
 
 
 if __name__ == "__main__":
-    if os.path.exists(os.path.join(os.path.dirname(__file__), "test.m4a")):
-        with open(os.path.join(os.path.dirname(__file__), "test.m4a"), "rb") as f:
-            audio_bytes = f.read()
-
-        audio_bytes = mp3_bytes_to_pcm_16k_mono_s16le(audio_bytes, format="m4a")
-
-        wsParam = Ws_Param(
-            APPID=get_config_value("APPID"),
-            APISecret=get_config_value("APISecret"),
-            APIKey=get_config_value("APIKey"),
-            AudioBytes=audio_bytes,
+    backend = get_config_value("audio2text_backend", default="", raise_if_missing=False)
+    test_path = Path(__file__).parent / "dataset" / "audio" / "抓取蓝色积木.m4a"
+    if test_path.exists():
+        print(
+            f"{test_path} 识别结果：",
+            audio_file2text(test_path.as_posix(), backend=backend),
         )
-        websocket.enableTrace(False)
-        wsUrl = wsParam.create_url()
-        ws = websocket.WebSocketApp(
-            wsUrl,
-            on_message=on_message,
-            on_error=on_error,
-            on_close=on_close,
-        )
-        ws.on_open = lambda ws: thread.start_new_thread(send, (ws, wsParam))
-        ws.run_forever(sslopt={"cert_reqs": ssl.CERT_NONE})
 
     print("=== 麦克风实时识别 ===")
-
-    backend = get_config_value("audio2text_backend", raise_if_missing=False)
     result = get_audio_text(backend=backend)
     print("麦克风识别结果：", result)

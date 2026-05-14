@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
-from config_getter import get_config_value
-
+from utils.config_getter import get_config_value
 
 @dataclass
 class DetectedFromLLM:

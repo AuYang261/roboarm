@@ -1,16 +1,14 @@
-
 import cv2
 # from object_detect.detect import detect_objects_in_frame, draw_box, load_model
 import numpy as np
-import yaml
 from ultralytics import YOLO
 import cv2
 import numpy as np
-import time
 import os
 import sys
+from utils.cv2_display import show_image, poll_key, set_mouse_callback
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from arm.arm_control import Arm
+from arm.arm_base import Arm
 
 # 使用机械臂摄像头对机械臂进行精确定位校准操作
 
@@ -139,7 +137,7 @@ def main():
                     np.rad2deg(r),
                     f"{class_name}: {score:.2f}",
                 )
-            cv2.imshow("YOLOv11", annotated_frame)
+            show_image("YOLOv11", annotated_frame)
         
         #======================================================================
         # part3 边缘检测和轮廓绘制
@@ -185,7 +183,7 @@ def main():
             cv2.putText(edged, f"Area: {area:.2f};Center: ({cX}, {cY})", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
-        cv2.imshow('Largest Contour', edged)
+        show_image('Largest Contour', edged)
             
         
         #======================================================================
@@ -195,7 +193,7 @@ def main():
         # 原始图像上绘制多边形2
         # cv2.polylines(org_frame, [pts2], isClosed=True, color=(0, 255, 0), thickness=2)
         # 原始图像上绘制轮廓
-        cv2.imshow('Arm Camera Contours', org_frame)
+        show_image('Arm Camera Contours', org_frame)
         
         # 获取图像上一点的坐标
         def get_point(event, x, y, flags, param):
@@ -204,7 +202,7 @@ def main():
                 # 保存 图像
                 cv2.imwrite("selected_point.jpg", org_frame)
                 
-        cv2.setMouseCallback('Arm Camera Contours', get_point)
+        set_mouse_callback('Arm Camera Contours', get_point)
         
         #======================================================================
         # part5 获取机械臂当前关节角度值并打印 & 微调机械臂
@@ -216,9 +214,8 @@ def main():
 
         #======================================================================
         # 按下 'esc' 键退出循环
-        if cv2.waitKey(1) & 0xFF == 27:
+        if poll_key(1) & 0xFF == 27:
             break
 
 if __name__ == "__main__":
     main()
-    
