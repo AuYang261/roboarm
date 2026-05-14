@@ -9,7 +9,7 @@ from flask import Flask, Response
 
 from utils.config_getter import get_config_value
 
-_HEADLESS: bool | None = True
+_HEADLESS: bool | None = None
 _WINDOW_READY: set[str] = set()
 _HEADLESS_SERVER_LOCK = threading.Lock()
 _HEADLESS_SERVER_STARTED = False
