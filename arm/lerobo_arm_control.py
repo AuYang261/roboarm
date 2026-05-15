@@ -10,7 +10,7 @@ sys.path.append(
 
 import time
 from arm.arm_base import Arm
-from arm.sim_client import SimArmClient
+from sim.sim_client import SimArmClient
 from scipy.optimize import minimize
 from scipy.spatial.transform import Rotation as R
 import numpy as np
