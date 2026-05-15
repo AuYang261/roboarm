@@ -530,6 +530,13 @@ def main():
     )
     args = argparser.parse_args()
 
+    arm_backend = get_config_value("arm_backend", "real", raise_if_missing=False)
+    if arm_backend == "sim" and args.mode in ("calibrate", "calibrate_board"):
+        print(
+            "手眼标定依赖真实相机与人工拖动机械臂，仿真模式下暂不支持采集，已退出"
+        )
+        return
+
     data_dir = os.path.join(os.path.dirname(__file__), "hand-eye-data")
     image_points_path = os.path.join(data_dir, "2d_image_points.npy")
     end_poses_path = os.path.join(data_dir, "2d_end_poses.npy")

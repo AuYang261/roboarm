@@ -18,30 +18,42 @@ from utils.config_getter import get_config_value
 
 def main():
     arm_type = get_config_value("arm_type")
+    arm_backend = get_config_value("arm_backend", "real", raise_if_missing=False)
+    if arm_type == "lerobo" and arm_backend == "sim":
+        print("offset 标定仅适用于真机，arm_backend=sim 时无需也无法标定，已退出")
+        return
+
     arm = Arm()
     arm.disable_torque()
 
-    while True:
-        print("=" * 10)
-        try:
-            # 需要原始接口获取真实原始数据，自己封装的高层接口是已考虑offset的修正数据
-            if arm_type == "lerobo":
-                for angle_deg in list(arm.arm.get_observation().values())[:-1]:
-                    print(f"  - {angle_deg:.2f}")
-            elif arm_type == "piper":
-                pos, rot = arm.get_arm_pose()
-                if pos:
-                    for pos_i in pos:
-                        print(f"  - {pos_i:.2f}")
-                if rot:
-                    for rot_i in rot:
-                        print(f"  - {rot_i:.2f}")
-            else:
-                raise RuntimeError(f"Unknown arm_type {arm_type}")
-        except Exception as e:
-            pass
-        time.sleep(0.1)
-    arm.disconnect_arm()
+    try:
+        while True:
+            print("=" * 10)
+            try:
+                # 需要原始接口获取真实原始数据，自己封装的高层接口是已考虑offset的修正数据
+                if arm_type == "lerobo":
+                    raw_angles_deg, _ = arm.get_raw_joint_angles()
+                    if raw_angles_deg is None:
+                        continue
+                    for angle_deg in raw_angles_deg:
+                        print(f"  - {angle_deg:.2f}")
+                elif arm_type == "piper":
+                    pos, rot = arm.get_arm_pose()
+                    if pos:
+                        for pos_i in pos:
+                            print(f"  - {pos_i:.2f}")
+                    if rot:
+                        for rot_i in rot:
+                            print(f"  - {rot_i:.2f}")
+                else:
+                    raise RuntimeError(f"Unknown arm_type {arm_type}")
+            except Exception:
+                pass
+            time.sleep(0.1)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        arm.disconnect_arm()
 
 
 if __name__ == "__main__":

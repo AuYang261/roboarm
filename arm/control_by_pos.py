@@ -146,7 +146,7 @@ def main():
                 TARGET_POSE[:3].tolist(),
                 gripper_open_0to1=TARGET_POSE[6],
                 rot_rad=TARGET_POSE[3],
-                euler_angles_deg_zyx=np.rad2deg(TARGET_POSE[3:6]).tolist(),
+                # euler_angles_deg_zyx=np.rad2deg(TARGET_POSE[3:6]).tolist(),
             )
         except Exception as e:
             print("Error:", e)

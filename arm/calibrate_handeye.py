@@ -6,6 +6,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from camera.camera_api import Camera
 from arm.arm_base import Arm
+from utils.config_getter import get_config_value
 import cv2
 import xlrd2, xlwt
 from math import cos, sin, pi
@@ -297,6 +298,10 @@ def collect_image_pose():
 
 
 def main():
+    arm_backend = get_config_value("arm_backend", "real", raise_if_missing=False)
+    if arm_backend == "sim":
+        print("手眼标定依赖真实相机与人工拖动机械臂，仿真模式下暂不支持，已退出")
+        return
     input_thread = threading.Thread(target=get_input)
     input_thread.daemon = True
     input_thread.start()

@@ -10,6 +10,7 @@ sys.path.append(
 
 import time
 from arm.arm_base import Arm
+from arm.sim_client import SimArmClient
 from scipy.optimize import minimize
 from scipy.spatial.transform import Rotation as R
 import numpy as np
@@ -46,9 +47,14 @@ class LeroboArm(Arm):
             steps: 插值步数，越大越平滑，但耗时越长。
         """
         super().__init__(hand_eye_calibration_file=hand_eye_calibration_file)
-        port = get_config_value("arm_port")
+        self.arm_backend = get_config_value(
+            "arm_backend", "real", raise_if_missing=False
+        )
         self.steps = steps
-        self.offset = get_config_value("arm_offset")
+        self.offset = (
+            get_config_value("arm_offset") if self.arm_backend != "sim" else [0] * 5
+        )
+
         if len(self.offset) != 5:
             raise ValueError(
                 "配置文件中没有正确设置机械臂offset arm_offset, 应该是5个关节的角度列表"
@@ -70,66 +76,136 @@ class LeroboArm(Arm):
             urdf_content, "gripper_static_1"
         )
 
-        self.arm = koch_follower.KochFollower(
-            config_koch_follower.KochFollowerConfig(
-                port=port,
-                disable_torque_on_disconnect=True,
-                use_degrees=True,
-                id=robot_id,
-                calibration_dir=Path(calibration_dir).resolve(),
+        if self.arm_backend == "sim":
+            self.sim_arm_client = SimArmClient(
+                host=get_config_value("arm_sim_host"),
+                port=get_config_value("arm_sim_port"),
             )
-        )
-        try:
-            self.arm.connect()
-        except ConnectionError as e:
-            raise ConnectionError(
-                f"机械臂连接失败: {e}\n请检查端口号{port}是否正确"
-                + (
-                    "，以及是否有777权限(sudo chmod 777 {port})"
-                    if os.name != "nt"
-                    else ""
+            while True:
+                try:
+                    self.sim_arm_client.ping()
+                    break
+                except ConnectionError as e:
+                    print(e, "retry in 1 s")
+                    time.sleep(1)
+            print("成功连接仿真服务")
+        else:
+            port = get_config_value("arm_port")
+            self.arm = koch_follower.KochFollower(
+                config_koch_follower.KochFollowerConfig(
+                    port=port,
+                    disable_torque_on_disconnect=True,
+                    use_degrees=True,
+                    id=robot_id,
+                    calibration_dir=Path(calibration_dir).resolve(),
                 )
-            ) from e
+            )
+            try:
+                self.arm.connect()
+            except ConnectionError as e:
+                raise ConnectionError(
+                    f"机械臂连接失败: {e}\n请检查端口号{port}是否正确"
+                    + (
+                        "，以及是否有777权限(sudo chmod 777 {port})"
+                        if os.name != "nt"
+                        else ""
+                    )
+                ) from e
+
+    def _get_joint_names(self) -> list[str]:
+        if self.arm_backend == "sim":
+            return self.sim_arm_client.get_joint_names()
+        return list(self.arm.bus.motors.keys())
+
+    def get_raw_joint_angles(
+        self, retry_times=None
+    ) -> tuple[Union[List[float], None], Union[float, None]]:
+        try:
+            if self.arm_backend == "sim":
+                return self.sim_arm_client.get_raw_joint_angles()
+            angles_deg = list(self.arm.get_observation().values())
+            return angles_deg[:-1], np.clip(
+                angles_deg[-1] / self.MAX_GRIPPER_ANGLE_DEG, 0, 1
+            )
+        except Exception:
+            if retry_times is None:
+                retry_times = self.get_arm_angles_retry_times
+            if retry_times > 0:
+                time.sleep(self.catch_time_interval_s)
+                return self.get_raw_joint_angles(retry_times - 1)
+            return None, None
 
     def set_arm_angles(
         self,
         angles_deg: Sequence[float | int] | None = None,
         gripper_open_0to1: float | None = None,
     ) -> bool:
-        motor_names = list(self.arm.bus.motors.keys())
-        action: dict[str, float] = {}
-        if gripper_open_0to1 is not None:
-            if not 0 <= gripper_open_0to1 <= 1:
-                raise ValueError("gripper_open_0to1 must in [0, 1]")
-            action[motor_names[-1] + ".pos"] = (
-                gripper_open_0to1 * self.MAX_GRIPPER_ANGLE_DEG
-            )
-        if angles_deg is not None:
-            for motor_name, angle_deg in zip(motor_names[:-1], angles_deg, strict=True):
+        joint_names = self._get_joint_names()
+        target_joint_angles = None if angles_deg is None else list(angles_deg)
+        target_gripper = gripper_open_0to1
+        if target_gripper is not None and not 0 <= target_gripper <= 1:
+            raise ValueError("gripper_open_0to1 must in [0, 1]")
+
+        if target_joint_angles is None and target_gripper is None:
+            return True
+
+        current_angles_deg, current_gripper_0to1 = self.get_arm_angles()
+        if current_angles_deg is None or current_gripper_0to1 is None:
+            return False
+
+        desired_joint_angles = list(current_angles_deg)
+        if target_joint_angles is not None:
+            for index, angle_deg in enumerate(target_joint_angles):
                 if angle_deg is not None:
-                    action[motor_name + ".pos"] = np.clip(angle_deg, -180, 180)
-        if len(action) > 0:
-            current_angles_deg, current_gripper_0to1 = self.get_arm_angles()
-            if current_angles_deg is None or current_gripper_0to1 is None:
-                return False
-            current_angles_deg.append(current_gripper_0to1 * self.MAX_GRIPPER_ANGLE_DEG)
-            for alpha in np.linspace(0, 1, self.steps + 1)[1:]:
-                interp_action = {}
-                for key, value in action.items():
-                    motor_index = motor_names.index(key.removesuffix(".pos"))
-                    current_angle = current_angles_deg[motor_index]
-                    interp_angle = current_angle * (1 - alpha) + value * alpha
-                    interp_action[key] = interp_angle + (
-                        self.offset[motor_index]
-                        if motor_index < len(self.offset)
-                        else 0
+                    desired_joint_angles[index] = float(np.clip(angle_deg, -180, 180))
+
+        desired_gripper = (
+            current_gripper_0to1 if target_gripper is None else float(target_gripper)
+        )
+
+        current_joint_angles = list(current_angles_deg)
+        current_gripper_angle_deg = current_gripper_0to1 * self.MAX_GRIPPER_ANGLE_DEG
+        desired_gripper_angle_deg = desired_gripper * self.MAX_GRIPPER_ANGLE_DEG
+
+        for alpha in np.linspace(0, 1, self.steps + 1)[1:]:
+            interp_joint_angles = []
+            for current_angle, desired_angle in zip(
+                current_joint_angles, desired_joint_angles, strict=True
+            ):
+                interp_joint_angles.append(
+                    current_angle * (1 - alpha) + desired_angle * alpha
+                )
+            interp_gripper_angle_deg = (
+                current_gripper_angle_deg * (1 - alpha)
+                + desired_gripper_angle_deg * alpha
+            )
+            try:
+                if self.arm_backend == "sim":
+                    self.sim_arm_client.send_joint_targets(
+                        joint_names,
+                        interp_joint_angles,
+                        interp_gripper_angle_deg / self.MAX_GRIPPER_ANGLE_DEG,
                     )
-                try:
-                    self.arm.send_action(interp_action)
-                except Exception as e:
-                    print(f"设置机械臂角度失败: {e}")
-                    return False
-                time.sleep(0.5 / self.steps)
+                else:
+                    action = {
+                        motor_name + ".pos": interp_angle + (self.offset[index])
+                        for index, (motor_name, interp_angle) in enumerate(
+                            zip(joint_names, interp_joint_angles, strict=True)
+                        )
+                    }
+                    action["gripper.pos"] = interp_gripper_angle_deg
+                    self.arm.send_action(action)
+            except Exception as e:
+                print(f"设置机械臂角度失败: {e}")
+                return False
+            time.sleep(0.5 / self.steps)
+
+        if self.arm_backend == "sim":
+            try:
+                self.sim_arm_client.wait_until_reached(desired_joint_angles)
+            except TimeoutError as e:
+                print(f"仿真机械臂未在超时内到达目标位姿: {e}")
+                return False
         return True
 
     def get_arm_angles(
@@ -145,19 +221,13 @@ class LeroboArm(Arm):
             - `angles_deg` 为关节角度列表，单位为度；失败时为 `None`
             - `gripper_open_0to1` 为夹爪开合程度，范围为 `[0, 1]`；失败时为 `None`
         """
-        try:
-            angles_deg = list(self.arm.get_observation().values())
-        except Exception:
-            if retry_times is None:
-                retry_times = self.get_arm_angles_retry_times
-            if retry_times > 0:
-                time.sleep(self.catch_time_interval_s)
-                return self.get_arm_angles(retry_times - 1)
+        raw_angles_deg, gripper_open_0to1 = self.get_raw_joint_angles(retry_times)
+        if raw_angles_deg is None or gripper_open_0to1 is None:
             return None, None
         return [
             angle - offset
-            for angle, offset in zip(angles_deg[:-1], self.offset, strict=True)
-        ], np.clip(angles_deg[-1] / self.MAX_GRIPPER_ANGLE_DEG, 0, 1)
+            for angle, offset in zip(raw_angles_deg, self.offset, strict=True)
+        ], gripper_open_0to1
 
     def get_arm_pose(self) -> tuple[list[float] | None, list[float] | None]:
         angles_deg, _ = self.get_arm_angles()
@@ -174,12 +244,21 @@ class LeroboArm(Arm):
         )
 
     def disconnect_arm(self):
+        if self.arm_backend == "sim":
+            self.sim_arm_client.disconnect()
+            return
         self.arm.disconnect()
 
     def enable_torque(self):
+        if self.arm_backend == "sim":
+            self.sim_arm_client.set_torque_enabled(True)
+            return
         self.arm.bus.enable_torque()
 
     def disable_torque(self):
+        if self.arm_backend == "sim":
+            self.sim_arm_client.set_torque_enabled(False)
+            return
         self.arm.bus.disable_torque()
 
     def move_to_home(self, gripper_open_0to1: float | None = None) -> bool:

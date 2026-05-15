@@ -10,6 +10,20 @@ arm_offset:
 # 机械臂类型，lerobo或piper
 arm_type: lerobo
 
+# 机械臂后端，real表示真机，sim表示通过HTTP连接Isaac Sim等仿真服务
+# 仅在 arm_type=lerobo 时使用，sim 模式下无需设置 arm_port
+arm_backend: real
+
+# arm_backend=sim 时，Isaac Sim HTTP 服务的地址和端口
+arm_sim_host: 192.168.2.19
+arm_sim_port: 8770
+
+# arm_backend=sim 时的请求超时秒数
+arm_sim_timeout_s: 10.0
+
+# 仿真时关节角向量允许的均方误差阈值，小于该值认为到达目标点，单位平方度
+arm_sim_reach_mse_threshold_deg2: 1.0
+
 # 不用远程摄像头则置空
 camera_ip: 
 camera_port: 8083

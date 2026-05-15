@@ -110,6 +110,26 @@ class Arm:
             "get_arm_angles method must be implemented in subclass"
         )
 
+    def get_raw_joint_angles(
+        self, retry_times=None
+    ) -> tuple[list[float] | None, float | None]:
+        """读取未应用 offset 修正的原始关节角度和夹爪开合程度。
+
+        主要用于 offset 标定等需要直接获取底层关节读数的低层场景；
+        正常业务请使用 `get_arm_angles`。
+
+        Args:
+            retry_times: 读取失败后的重试次数；`None` 表示由子类决定默认值。
+
+        Returns:
+            一个二元组 `(angles_deg, gripper_open_0to1)`：
+            - `angles_deg` 为未修正的原始关节角度列表，单位为度；失败时为 `None`
+            - `gripper_open_0to1` 为夹爪开合程度，范围为 `[0, 1]`；失败时为 `None`
+        """
+        raise NotImplementedError(
+            "get_raw_joint_angles method must be implemented in subclass"
+        )
+
     def get_arm_pose(self) -> tuple[list[float] | None, list[float] | None]:
         """读取当前末端位姿。
 
