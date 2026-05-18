@@ -10,6 +10,11 @@ import numpy as np
 from utils.config_getter import get_config_value
 from scipy.spatial.transform import Rotation as R
 from typing_extensions import Self
+from collections.abc import Callable
+from typing import Any
+
+
+StepCallback = Callable[[dict[str, Any]], None]
 
 
 class Arm:
@@ -78,6 +83,7 @@ class Arm:
         self,
         angles_deg: Sequence[float | int] | None = None,
         gripper_open_0to1: float | None = None,
+        step_callback: StepCallback | None = None,
     ) -> bool:
         """设置关节角度和夹爪开合程度。
 
@@ -140,7 +146,11 @@ class Arm:
         """
         raise NotImplementedError("get_arm_pose method must be implemented in subclass")
 
-    def move_to_home(self, gripper_open_0to1: float | int | None = None) -> bool:
+    def move_to_home(
+        self,
+        gripper_open_0to1: float | int | None = None,
+        step_callback: StepCallback | None = None,
+    ) -> bool:
         """将机械臂移动到归零位。
 
         Args:
@@ -157,6 +167,7 @@ class Arm:
         gripper_open_0to1: float | int | None = None,
         rot_rad: float | int | None = None,
         euler_angles_deg_zyx: list[float] | None = None,
+        step_callback: StepCallback | None = None,
     ) -> bool:
         """将末端移动到目标位置。
 
@@ -172,7 +183,11 @@ class Arm:
         """
         raise NotImplementedError("move_to method must be implemented in subclass")
 
-    def set_gripper(self, gripper_open_0to1: float):
+    def set_gripper(
+        self,
+        gripper_open_0to1: float,
+        step_callback: StepCallback | None = None,
+    ):
         """设置夹爪开合程度。
 
         Args:
@@ -226,6 +241,7 @@ class Arm:
         target_y: float,
         rot_rad: float,
         height: float = inf,
+        step_callback: StepCallback | None = None,
     ) -> bool:
         """执行抓取动作。
 
@@ -244,6 +260,7 @@ class Arm:
             [target_x, target_y, target_z + self.catch_raise_height],
             gripper_open_0to1=1,
             rot_rad=rot_rad,
+            step_callback=step_callback,
         )
         if not res:
             print("移动到目标位置上方失败，取消抓取")
@@ -255,6 +272,7 @@ class Arm:
             [target_x, target_y, target_z],
             gripper_open_0to1=1,
             rot_rad=rot_rad,
+            step_callback=step_callback,
         )
         if not res:
             print("移动到目标位置失败，取消抓取")
@@ -262,13 +280,14 @@ class Arm:
             return False
         time.sleep(self.catch_time_interval_s)
 
-        self.set_gripper(gripper_open_0to1=0)
+        self.set_gripper(gripper_open_0to1=0, step_callback=step_callback)
         time.sleep(self.catch_time_interval_s)
 
         res = self.move_to(
             [target_x, target_y, target_z + self.catch_raise_height],
             gripper_open_0to1=0,
             rot_rad=rot_rad,
+            step_callback=step_callback,
         )
         if not res:
             print("抬起失败，取消抓取")
@@ -298,6 +317,7 @@ class Arm:
         target_y: float,
         target_z: float,
         rot_rad: float = 0,
+        step_callback: StepCallback | None = None,
     ) -> bool:
         """执行放置动作。
 
@@ -315,6 +335,7 @@ class Arm:
             [target_x, target_y, target_z + self.place_raise_height],
             gripper_open_0to1=0,
             rot_rad=rot_rad,
+            step_callback=step_callback,
         )
         if not res:
             print("移动到放置位置上方失败，取消放置")
@@ -330,6 +351,7 @@ class Arm:
                 [target_x, target_y, target_z],
                 gripper_open_0to1=0,
                 rot_rad=rot_rad,
+                step_callback=step_callback,
             )
             if not res:
                 print("移动到放置位置失败，取消放置")
@@ -337,13 +359,14 @@ class Arm:
                 return False
             time.sleep(self.catch_time_interval_s)
 
-        self.set_gripper(gripper_open_0to1=1)
+        self.set_gripper(gripper_open_0to1=1, step_callback=step_callback)
 
         if down:
             res = self.move_to(
                 [target_x, target_y, target_z + self.place_raise_height],
                 gripper_open_0to1=1,
                 rot_rad=rot_rad,
+                step_callback=step_callback,
             )
             if not res:
                 print("移动到放置位置上方失败，取消放置")
@@ -361,6 +384,7 @@ class Arm:
         place_pos: list[float | int] = [0.2, 0.0],
         height: float = inf,
         place_rotate_rad: float = 0,
+        step_callback: StepCallback | None = None,
     ) -> bool:
         """执行抓取后放置的完整流程。
 
@@ -383,14 +407,26 @@ class Arm:
         else:
             print("放置位置格式错误，应该是[x, y]或[x, y, z]")
             return False
-        if not self.catch(target_x, target_y, catch_rotate_rad, height=height):
+        if not self.catch(
+            target_x,
+            target_y,
+            catch_rotate_rad,
+            height=height,
+            step_callback=step_callback,
+        ):
             self.move_to_home(gripper_open_0to1=1)
             return False
         # self.move_to_home()
-        if not self.place(place_x, place_y, place_z, place_rotate_rad):
+        if not self.place(
+            place_x,
+            place_y,
+            place_z,
+            place_rotate_rad,
+            step_callback=step_callback,
+        ):
             self.move_to_home(gripper_open_0to1=1)
             return False
-        self.move_to_home(gripper_open_0to1=1)
+        self.move_to_home(gripper_open_0to1=1, step_callback=step_callback)
         return True
 
     def pixel2pos(self, u: float, v: float) -> tuple[float, float]:

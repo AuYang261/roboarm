@@ -1,6 +1,9 @@
 import time
+import base64
 from collections.abc import Sequence
 
+import cv2
+import numpy as np
 import requests
 from utils.config_getter import get_config_value
 
@@ -126,6 +129,42 @@ class SimArmClient:
 
     def set_torque_enabled(self, enabled: bool) -> None:
         self._request("POST", "/torque", {"enabled": bool(enabled)})
+
+    def spawn_object(
+        self,
+        position: Sequence[float],
+        object_type: str = "block",
+        rotation_rad: float | None = None,
+    ) -> dict:
+        payload = {
+            "type": object_type,
+            "position": [float(value) for value in position],
+        }
+        if rotation_rad is not None:
+            payload["rotation_rad"] = float(rotation_rad)
+        return self._request("POST", "/object", payload)
+
+    def get_object_pose(self) -> list[float]:
+        result = self._request("GET", "/object/pose")
+        pose = result.get("position", result.get("object_position"))
+        if not isinstance(pose, list) or not all(
+            isinstance(value, (int, float)) for value in pose
+        ):
+            raise RuntimeError("simulation service did not return object position")
+        return [float(value) for value in pose]
+
+    def get_camera_rgb(self, camera_name: str = "gripper_cam") -> np.ndarray:
+        result = self._request("GET", f"/camera/rgb?camera={camera_name}")
+        image = result.get("rgb", result.get("image"))
+        if isinstance(image, list):
+            return np.asarray(image, dtype=np.uint8)
+        if isinstance(image, str):
+            raw = base64.b64decode(image)
+            decoded = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if decoded is None:
+                raise RuntimeError("simulation service returned an invalid rgb image")
+            return cv2.cvtColor(decoded, cv2.COLOR_BGR2RGB)
+        raise RuntimeError("simulation service did not return rgb image data")
 
     def disconnect(self) -> None:
         # self._request("POST", "/shutdown", {})
