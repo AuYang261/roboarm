@@ -15,9 +15,7 @@ class SimArmClient:
             "arm_sim_timeout_s", 3.0, raise_if_missing=False
         )
         self.reach_mse_threshold = float(
-            get_config_value(
-                "arm_sim_reach_mse_threshold_deg2", 1.0, raise_if_missing=False
-            )
+            get_config_value("arm_sim_reach_mse_threshold_deg2")
         )
 
     def _request(
@@ -142,7 +140,14 @@ class SimArmClient:
         }
         if rotation_rad is not None:
             payload["rotation_rad"] = float(rotation_rad)
-        return self._request("POST", "/object", payload)
+        while True:
+            try:
+                ret = self._request("POST", "/object", payload)
+                break
+            except ConnectionError as e:
+                print(e)
+                time.sleep(1)
+        return ret
 
     def get_object_pose(self) -> list[float]:
         result = self._request("GET", "/object/pose")

@@ -79,6 +79,11 @@ class Arm:
         if os.path.exists(hand_eye_calibration_file):
             self.hand_eye_calibration_matrix = np.load(hand_eye_calibration_file)
 
+        if not 0 <= self.default_gripper_close_threshold <= 1:
+            print(
+                "Warning: The definition of gripper state limit is [0, 1], not angle degrees."
+            )
+
     def set_arm_angles(
         self,
         angles_deg: Sequence[float | int] | None = None,
@@ -280,12 +285,14 @@ class Arm:
             return False
         time.sleep(self.catch_time_interval_s)
 
-        self.set_gripper(gripper_open_0to1=0, step_callback=step_callback)
+        self.set_gripper(
+            gripper_open_0to1=self.default_gripper_close_threshold,
+            step_callback=step_callback,
+        )
         time.sleep(self.catch_time_interval_s)
 
         res = self.move_to(
             [target_x, target_y, target_z + self.catch_raise_height],
-            gripper_open_0to1=0,
             rot_rad=rot_rad,
             step_callback=step_callback,
         )
@@ -296,11 +303,6 @@ class Arm:
         time.sleep(self.catch_time_interval_s)
 
         _, current_gripper_open_0to1 = self.get_arm_angles()
-
-        if not 0 <= self.default_gripper_close_threshold <= 1:
-            print(
-                "Warning: The definition of gripper state limit is [0, 1], not angle degrees."
-            )
 
         if (
             current_gripper_open_0to1 is None
@@ -333,7 +335,6 @@ class Arm:
         """
         res = self.move_to(
             [target_x, target_y, target_z + self.place_raise_height],
-            gripper_open_0to1=0,
             rot_rad=rot_rad,
             step_callback=step_callback,
         )
@@ -349,7 +350,6 @@ class Arm:
         if down:
             res = self.move_to(
                 [target_x, target_y, target_z],
-                gripper_open_0to1=0,
                 rot_rad=rot_rad,
                 step_callback=step_callback,
             )
@@ -364,7 +364,6 @@ class Arm:
         if down:
             res = self.move_to(
                 [target_x, target_y, target_z + self.place_raise_height],
-                gripper_open_0to1=1,
                 rot_rad=rot_rad,
                 step_callback=step_callback,
             )

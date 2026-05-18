@@ -191,7 +191,7 @@ class LeroboArm(Arm):
                     action = {
                         motor_name + ".pos": interp_angle + (self.offset[index])
                         for index, (motor_name, interp_angle) in enumerate(
-                            zip(joint_names, interp_joint_angles, strict=True)
+                            zip(joint_names[:-1], interp_joint_angles, strict=True)
                         )
                     }
                     action["gripper.pos"] = interp_gripper_angle_deg
@@ -221,7 +221,7 @@ class LeroboArm(Arm):
                 return False
             time.sleep(0.5 / self.steps)
 
-        if self.arm_backend == "sim":
+        if self.arm_backend == "sim" and angles_deg is not None:
             try:
                 self.sim_arm_client.wait_until_reached(desired_joint_angles)
             except TimeoutError as e:

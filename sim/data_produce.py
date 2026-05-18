@@ -23,6 +23,7 @@ class EpisodeBuffer:
     current_joint_angles_deg: list[list[float]] = field(default_factory=list)
     current_gripper_open_0to1: list[float] = field(default_factory=list)
     camera_rgb: list[np.ndarray] = field(default_factory=list)
+    camera_top_rgb: list[np.ndarray] = field(default_factory=list)
     object_position: list[list[float]] = field(default_factory=list)
     timestamp_s: list[float] = field(default_factory=list)
 
@@ -77,6 +78,16 @@ def _write_episode(
             )
         else:
             h5.create_dataset("camera_rgb", data=np.empty((0,), dtype=np.uint8))
+        if buffer.camera_top_rgb:
+            h5.create_dataset(
+                "camera_top_rgb",
+                data=np.stack(buffer.camera_top_rgb).astype(np.uint8),
+                compression="gzip",
+                compression_opts=4,
+                chunks=(1, *buffer.camera_top_rgb[0].shape),
+            )
+        else:
+            h5.create_dataset("camera_top_rgb", data=np.empty((0,), dtype=np.uint8))
         h5.create_dataset(
             "object_position",
             data=np.asarray(buffer.object_position, dtype=np.float32),
@@ -136,7 +147,7 @@ def collect_episode(
         float(rng.uniform(*args.object_y_range)),
         float(args.object_z),
     ]
-    object_rotation = float(rng.uniform(-np.pi, np.pi))
+    object_rotation = float(rng.uniform(0, np.pi / 2))
     spawn_info = sim_client.spawn_object(
         object_position,
         object_type=args.object_type,
@@ -155,7 +166,8 @@ def collect_episode(
         buffer.target_gripper_open_0to1.append(float(step["target_gripper_open_0to1"]))
         buffer.current_joint_angles_deg.append([float(v) for v in current_angles])
         buffer.current_gripper_open_0to1.append(float(current_gripper))
-        buffer.camera_rgb.append(sim_client.get_camera_rgb())
+        buffer.camera_rgb.append(sim_client.get_camera_rgb("gripper_cam"))
+        buffer.camera_top_rgb.append(sim_client.get_camera_rgb("top"))
         buffer.object_position.append(sim_client.get_object_pose())
         buffer.timestamp_s.append(time.monotonic() - start_time)
 
@@ -165,12 +177,13 @@ def collect_episode(
     error = None
     try:
         arm.move_to_home(gripper_open_0to1=1, step_callback=record_frame)
+        catch_rotation_rad = -object_rotation
+        offset = get_config_value("catch_offset")
         arm_success = arm.catch_and_place(
-            object_position[0],
-            object_position[1],
-            object_rotation,
+            object_position[0] + offset * np.cos(catch_rotation_rad),
+            object_position[1] - offset * np.sin(catch_rotation_rad),
+            catch_rotation_rad,
             place_pos=place_position,
-            height=object_position[2],
             place_rotate_rad=args.place_rotation_rad,
             step_callback=record_frame,
         )
@@ -199,30 +212,31 @@ def collect_episode(
         place_position=place_position,
         error=error,
     )
+    print("catch and place task", "success" if success else "failed")
     return path
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Produce simulated grasp episodes.")
-    parser.add_argument("--episodes", type=int, default=10)
-    parser.add_argument("--output-dir", type=Path, default=Path("sim_dataset"))
+    parser.add_argument("--episodes", type=int, default=1000)
+    parser.add_argument(
+        "--output-dir", type=Path, default=Path(__file__).parent / "sim_dataset"
+    )
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--object-type", default="block")
-    parser.add_argument("--object-x-range", type=_float_pair, default=(-0.08, 0.08))
-    parser.add_argument("--object-y-range", type=_float_pair, default=(-0.08, 0.08))
+    parser.add_argument("--object-x-range", type=_float_pair, default=(-0.1, 0.1))
+    parser.add_argument("--object-y-range", type=_float_pair, default=(0.05, 0.15))
     parser.add_argument(
         "--object-z",
         type=float,
-        default=float(get_config_value("default_desktop_height", 0.075)),
+        default=0.02,
     )
-    parser.add_argument("--place-position", type=float, nargs="+", default=[0.2, 0.0])
+    parser.add_argument("--place-position", type=float, nargs="+", default=[0.1, 0.0])
     parser.add_argument("--place-rotation-rad", type=float, default=0.0)
     parser.add_argument(
         "--success-distance-threshold",
         type=float,
-        default=float(
-            get_config_value("place_distance_threshold", 0.05, raise_if_missing=False)
-        ),
+        default=float(get_config_value("place_distance_threshold")),
     )
     return parser.parse_args()
 
