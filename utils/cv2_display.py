@@ -9,32 +9,21 @@ from flask import Flask, Response
 
 from utils.config_getter import get_config_value
 
-_HEADLESS: bool | None = None
 _WINDOW_READY: set[str] = set()
 _HEADLESS_SERVER_LOCK = threading.Lock()
 _HEADLESS_SERVER_STARTED = False
 _HEADLESS_TEMPLATE_PATH = Path(__file__).with_name("cv2_display.html")
 _HEADLESS_SERVER_HOST = "0.0.0.0"
 _HEADLESS_SERVER_PORT = get_config_value(
-    "cv2_headless_port", 8765, raise_if_missing=False
+    "cv2_headless_port", None, raise_if_missing=False
 )
 _HEADLESS_JPEG_QUALITY = 90
 _HEADLESS_LATEST_FRAMES: dict[str, bytes] = {}
 _HEADLESS_FRAME_EVENTS: dict[str, threading.Event] = {}
 
 
-def is_headless() -> bool:
-    global _HEADLESS
-    if _HEADLESS is not None:
-        return _HEADLESS
-    try:
-        test_window = "__cv2_headless_probe__"
-        cv2.namedWindow(test_window, cv2.WINDOW_NORMAL)
-        cv2.destroyWindow(test_window)
-        _HEADLESS = False
-    except cv2.error:
-        _HEADLESS = True
-    return _HEADLESS
+def show_img_by_web() -> bool:
+    return _HEADLESS_SERVER_PORT is not None
 
 
 def _frame_event(window_name: str) -> threading.Event:
@@ -127,7 +116,7 @@ def _publish_headless_frame(window_name: str, image: Any) -> None:
 
 
 def show_image(window_name: str, image: Any):
-    if is_headless():
+    if show_img_by_web():
         _ensure_headless_server()
         _publish_headless_frame(window_name, image)
         return
@@ -138,13 +127,13 @@ def show_image(window_name: str, image: Any):
 
 
 def poll_key(delay: int = 1) -> int:
-    if is_headless():
+    if show_img_by_web():
         return -1
     return cv2.waitKey(delay)
 
 
 def set_mouse_callback(window_name: str, callback: Callable[..., Any]):
-    if is_headless():
+    if show_img_by_web():
         return
     if window_name not in _WINDOW_READY:
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
@@ -153,13 +142,13 @@ def set_mouse_callback(window_name: str, callback: Callable[..., Any]):
 
 
 def destroy_all_windows():
-    if is_headless():
+    if show_img_by_web():
         return
     cv2.destroyAllWindows()
 
 
 def destroy_window(window_name: str):
-    if is_headless():
+    if show_img_by_web():
         return
     cv2.destroyWindow(window_name)
     _WINDOW_READY.discard(window_name)

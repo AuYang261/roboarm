@@ -28,7 +28,7 @@ arm_sim_reach_mse_threshold_deg2: 1.0
 camera_ip: 
 camera_port: 8083
 
-# headless 预览服务端口，若在无图形化环境运行，则显示的图片通过此端口启动为一个网络服务
+# 以web形式显示图片的端口（起一个网络服务器），以便在无图形化环境运行，置空则直接用opencv的图片显示窗口
 cv2_headless_port: 8765
 
 # 默认桌面高度，即在机械臂坐标系下桌面的z坐标，通常是实测出来的，单位米
