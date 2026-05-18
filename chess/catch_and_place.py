@@ -3,9 +3,10 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from arm.arm_control import Arm
+from utils.config_getter import get_config_value
+from arm.arm_base import Arm
 import numpy as np
-from classification.object_detect.detect import (
+from object_detect.detect import (
     detect_objects_in_frame,
     load_model,
     draw_box,
@@ -13,32 +14,23 @@ from classification.object_detect.detect import (
 from camera.camera_api import Camera
 import cv2
 import time
-import yaml
 import concurrent.futures
-
+from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 def main():
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    config_yaml = yaml.safe_load(
-        open(
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml"),
-            encoding="utf-8",
-        )
-    )
     model_paths = [
         os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
-        for path in config_yaml.get("classification_YOLO_model_path", [])
+        for path in get_config_value("chinese_chess_YOLO_model_path", [])
     ]
-    default_gripper_aside_pos = config_yaml.get(
-        "default_gripper_aside_pos", [0.1, 0.0, 0.12]
+    default_gripper_aside_pos = get_config_value(
+        "default_gripper_aside_pos", raise_if_missing=False
     )
-    default_conf_thres = config_yaml.get("default_conf_thres", 0.8)
-    class_pos = config_yaml.get("class_pos", {})
-    place_distance_threshold = config_yaml.get("place_distance_threshold", 0.03)
-    offset = config_yaml.get("catch_offset", 0.00)
+    default_conf_thres = get_config_value("chinese_chess_default_conf_thres")
+    offset = get_config_value("catch_offset")
 
     arm = Arm()
-    arm.move_to_home(gripper_angle_deg=80)
+    arm.move_to_home(gripper_open_0to1=1)
     cam = Camera(color=True, depth=False)
     models = [load_model(model_path) for model_path in model_paths]
     detections = []
@@ -91,33 +83,21 @@ def main():
                     if gripper_angle_rad > np.pi / 2:
                         gripper_angle_rad -= np.pi
 
-                    if (
-                        np.linalg.norm(
-                            np.array(class_pos.get(class_name, [-0.2, 0.0]))
-                            - np.array([target_x, target_y])
-                        )
-                        < place_distance_threshold
-                    ):
-                        print(
-                            f"Object {class_name} is too close to place position, skipping catch."
-                        )
-                    else:
-                        future = executor.submit(
-                            arm.catch_and_place,
-                            # 夹爪向外偏移一些，避免刚好顶到物体
-                            target_x + offset * np.cos(gripper_angle_rad),
-                            target_y + offset * np.sin(-gripper_angle_rad),
-                            gripper_angle_rad,
-                            class_pos.get(class_name, [-0.2, 0.0]),
-                        )
+                    future = executor.submit(
+                        arm.catch_and_place,
+                        # 夹爪向外偏移一些，避免刚好顶到物体
+                        target_x + offset * np.cos(gripper_angle_rad),
+                        target_y + offset * np.sin(-gripper_angle_rad),
+                        gripper_angle_rad,
+                        [target_x, target_y],
+                    )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 
-            if future is None or future.done():
+            if default_gripper_aside_pos and (future is None or future.done()):
                 # 移到旁边以免挡住视野
                 future = executor.submit(
                     arm.move_to,
                     default_gripper_aside_pos,
-                    80,
                 )
             end_time = time.time()
             if end_time - start_time == 0:
@@ -133,17 +113,17 @@ def main():
                 (0, 255, 0),
                 2,
             )
-            cv2.imshow("Detections", frame)
-            if cv2.waitKey(1) & 0xFF == 27:  # 按Esc键退出
+            show_image("Detections", frame)
+            if poll_key(1) & 0xFF == 27:  # 按Esc键退出
                 break
         except KeyboardInterrupt:
             print("Exiting...")
 
-    arm.move_to_home(gripper_angle_deg=80)
+    arm.move_to_home(gripper_open_0to1=1)
     time.sleep(1)
     arm.disconnect_arm()
     cam.close()
-    cv2.destroyAllWindows()
+    destroy_all_windows()
 
 
 if __name__ == "__main__":

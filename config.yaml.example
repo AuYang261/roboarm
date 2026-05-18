@@ -1,4 +1,4 @@
-
+# lerobo机械臂为COM*，piper机械臂为can*
 arm_port: COM3
 arm_offset:
   - 0
@@ -7,11 +7,31 @@ arm_offset:
   - -50
   - 0
 
+# 机械臂类型，lerobo或piper
+arm_type: lerobo
+
+# 机械臂后端，real表示真机，sim表示通过HTTP连接Isaac Sim等仿真服务
+# 仅在 arm_type=lerobo 时使用，sim 模式下无需设置 arm_port
+arm_backend: real
+
+# arm_backend=sim 时，Isaac Sim HTTP 服务的地址和端口
+arm_sim_host: 192.168.2.19
+arm_sim_port: 8770
+
+# arm_backend=sim 时的请求超时秒数
+arm_sim_timeout_s: 10.0
+
+# 仿真时关节角向量允许的均方误差阈值，小于该值认为到达目标点，单位平方度
+arm_sim_reach_mse_threshold_deg2: 1.0
+
 # 不用远程摄像头则置空
 camera_ip: 
 camera_port: 8083
 
-# 默认桌面高度，即在机械臂坐标系下桌面的z坐标，单位米
+# headless 预览服务端口，若在无图形化环境运行，则显示的图片通过此端口启动为一个网络服务
+cv2_headless_port: 8765
+
+# 默认桌面高度，即在机械臂坐标系下桌面的z坐标，通常是实测出来的，单位米
 default_desktop_height: 0.075
 
 # 抓取动作间的停顿时间，单位秒
@@ -20,39 +40,101 @@ catch_time_interval_s: 0.1
 # 获取机械臂各舵机角度值的重试次数
 get_arm_angles_retry_times: 3
 
-# =======物品分类场景=======
-
-# 以项目根目录为基准
-classification_YOLO_model_path:
-  - classification\object_detect\runs\积木方块\best.pt
-#  - classification\object_detect\runs\积木螺丝国际象棋\best.pt
-
-# 默认YOLO识别置信度阈值
-default_conf_thres: 0.85
-
 # 机械臂移动到旁边的位置，以免挡住相机视野，(x,y,z)，单位米
 default_gripper_aside_pos:
   - 0.1
   - 0.0
   - 0.12
 
-# 夹爪闭合角度阈值，小于该值认为夹取失败，单位度
-default_gripper_close_threshold: 3
+# =======大模型=======
+
+# 请求大模型的平台url
+# llm_base_url: https://openrouter.ai/api/v1
+# llm_base_url: https://api.ohmygpt.com/v1
+llm_base_url: http://192.168.0.19:8001/v1
+
+# 大模型平台的api_key，本地部署则随便填，但不要为空
+llm_api_key: any
+
+# 提示词文件
+prompts_file: prompts.toml
+
+# 代理地址，如请求大模型失败可设置或取消代理，注意若本地代理开了TUN模式，这里不设置代理可能会请求不到
+https_proxy: 
+
+# 使用的大模型名称，见https://openrouter.ai/models 或 https://www.ohmygpt.com/models，必须是支持多模态输入的模型
+# llm_model: gemini-3-flash-preview
+# 或指定本地部署的模型
+llm_model: output/merged-qwen3.5-9b-graspdet
+
+# 如果相机是在机械臂对面，视角和机械臂视角相反（机械臂在画面上方），则设为true
+# 主要影响大模型的左右判断
+RotationCam2Arm: true
+
+
+# 语音转文字后端: "xunfei" 使用讯飞，其他值使用自部署语音转文字服务
+audio2text_backend: no-xunfei
+
+# 自部署语音转文字服务地址
+whisper_url: http://192.168.0.19:8000
+whisper_username: wowrobo
+whisper_password: wowrobo
+
+# 语音转文字APIID（讯飞）
+APPID: 
+
+# 语音转文字APISecret
+APISecret: 
+
+# 语音转文字APIKey
+APIKey: 
+
+
+# =======物品分类场景=======
+
+# 以项目根目录为基准
+classification_YOLO_model_path:
+  - object_detect/runs/积木方块/best.pt
+
+# 默认YOLO识别置信度阈值
+default_conf_thres: 0.85
+
+# 夹爪闭合阈值，小于该值认为夹取失败，范围是[0,1]，越大越开，1表示完全张开（不是角度）
+default_gripper_close_threshold: 0.05
 
 # 各类别放置位置，(x,y)，单位米
+# keywords表示大模型输出的标签中含有其中某个关键词即认为是这个类别
 class_pos:
   blue_block:
-    - 0.2
-    - 0
+    pos:
+      - 0.2
+      - 0
+    keywords:
+      - 'blue'
+      - '蓝'
   white_block:
-    - -0.2
-    - 0
+    pos:
+      - -0.2
+      - 0
+    keywords:
+      - 'white'
+      - '白'
+
 
 # 离放置位置多近时无需抓取，以免反复抓放，单位米
 place_distance_threshold: 0.05
 
 # 抓取时为避免刚好顶到物体，夹爪向外偏移一些的距离，单位米
 catch_offset: 0.01
+
+# 抓取前抬起的高度，单位米
+catch_raise_height: 0.1
+
+# 放置前抬起的高度，单位米
+place_raise_height: 0.1
+
+# 放置时是否先下降再松开夹爪，默认否
+go_down_before_open_gripper_in_place: False
 
 # =======主从臂跟随场景=======
 
@@ -61,11 +143,14 @@ leader_port: COM5
 # =======中国象棋场景=======
 
 # 以项目根目录为基准
-classification_YOLO_model_path:
-  - classification\object_detect\runs\中国象棋\best.pt
+chinese_chess_YOLO_model_path:
+  - object_detect\runs\中国象棋\best.pt
 
 # 夹爪张开的角度，张太大会碰到旁边的子，单位度
 gripper_open_degree: 30
 
 # 夹爪朝向固定角度，以棋盘对角线方向抓，防止碰到旁边的棋子，单位度
 gripper_direction_degree: 45
+
+# 默认YOLO识别置信度阈值
+chinese_chess_default_conf_thres: 0.7

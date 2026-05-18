@@ -13,10 +13,10 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-import utils
+import camera_utils
 import cv2
 import numpy as np
-
+from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 def open_camera(color: bool, depth: bool) -> Pipeline:
     if not color and not depth:
@@ -48,7 +48,7 @@ def close_camera(pipeline: Pipeline):
 
 def _process_color(frame):
     """Process color image"""
-    return utils.frame_to_bgr_image(frame) if frame else None
+    return camera_utils.frame_to_bgr_image(frame) if frame else None
 
 
 def _process_depth(frame):
@@ -85,18 +85,18 @@ def main():
             if color_image is None:
                 print("failed to get color image")
             else:
-                cv2.imshow("Color Viewer", color_image)
+                show_image("Color Viewer", color_image)
             depth_image = frames.get("depth")
             if depth_image is None:
                 print("failed to get depth image")
             else:
-                cv2.imshow("Depth Viewer", depth_image)
-            key = cv2.waitKey(1)
+                show_image("Depth Viewer", depth_image)
+            key = poll_key(1)
             if key == ord("q") or key == 27:
                 break
         except KeyboardInterrupt:
             break
-    cv2.destroyAllWindows()
+    destroy_all_windows()
     pipeline.stop()
 
 

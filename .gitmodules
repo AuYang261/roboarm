@@ -4,3 +4,6 @@
 [submodule "chess/chinese_chess/MyChess"]
 	path = chess/chinese_chess/MyChess
 	url = https://github.com/mm12432/MyChess.git
+[submodule "sim/isaac-sim"]
+	path = sim/isaac-sim
+	url = git@github.com:ohhhHwH/isaac-sim-lerobot.git

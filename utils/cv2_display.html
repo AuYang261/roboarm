@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>OpenCV Headless Stream</title>
+  <style>
+    :root {
+      --page-gap: 16px;
+      --tile-gap: 10px;
+      --tile-padding: 12px;
+      --header-height: 36px;
+      --min-tile-width: 320px;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      background: #111;
+      color: #eee;
+      overflow: hidden;
+    }
+    .page {
+      padding: var(--page-gap);
+      width: 100%;
+      height: 100vh;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(var(--min-tile-width), 1fr));
+      gap: var(--page-gap);
+      align-items: start;
+      width: 100%;
+      height: 100%;
+    }
+    .tile {
+      background: #1b1b1b;
+      border-radius: 12px;
+      padding: var(--tile-padding);
+      display: flex;
+      flex-direction: column;
+      gap: var(--tile-gap);
+      min-width: 0;
+      height: 100%;
+    }
+    .tile-header {
+      height: var(--header-height);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      font-size: 22px;
+      font-weight: 700;
+      color: #8bd5ff;
+      word-break: break-word;
+    }
+    .tile-stream {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      flex: 1;
+      min-height: 0;
+    }
+    img {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      background: #000;
+    }
+    .hint {
+      color: #aaa;
+      text-align: center;
+      padding: 48px 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div id="emptyState" class="hint">Waiting for frames...</div>
+    <div id="grid" class="grid"></div>
+  </div>
+  <script>
+    const grid = document.getElementById('grid');
+    const emptyState = document.getElementById('emptyState');
+    const tiles = new Map();
+
+    function updateLayout(windowCount) {
+      if (!windowCount) {
+        grid.style.gridTemplateColumns = '';
+        return;
+      }
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const gap = 16;
+      const pagePadding = 32;
+      const tilePadding = 24;
+      const headerHeight = 46;
+      const usableWidth = Math.max(320, viewportWidth - pagePadding);
+      const usableHeight = Math.max(180, viewportHeight - pagePadding);
+      const aspectRatio = 1280 / 720;
+      let bestColumns = 1;
+      let bestScore = 0;
+
+      for (let columns = 1; columns <= windowCount; columns += 1) {
+        const rows = Math.ceil(windowCount / columns);
+        const tileWidth = (usableWidth - gap * (columns - 1)) / columns;
+        const tileHeight = (usableHeight - gap * (rows - 1)) / rows;
+        const streamWidth = tileWidth - tilePadding;
+        const streamHeight = tileHeight - tilePadding - headerHeight;
+        if (streamWidth <= 0 || streamHeight <= 0) {
+          continue;
+        }
+        const fittedHeight = Math.min(streamHeight, streamWidth / aspectRatio);
+        const fittedWidth = Math.min(streamWidth, fittedHeight * aspectRatio);
+        const score = fittedWidth * fittedHeight;
+        if (score > bestScore) {
+          bestScore = score;
+          bestColumns = columns;
+        }
+      }
+
+      grid.style.gridTemplateColumns = `repeat(${bestColumns}, minmax(0, 1fr))`;
+    }
+
+    function createTile(windowName) {
+      const tile = document.createElement('section');
+      tile.className = 'tile';
+      tile.dataset.windowName = windowName;
+
+      const header = document.createElement('div');
+      header.className = 'tile-header';
+      header.textContent = windowName;
+
+      const streamWrap = document.createElement('div');
+      streamWrap.className = 'tile-stream';
+
+      const img = document.createElement('img');
+      img.alt = windowName;
+      img.src = `/stream/${encodeURIComponent(windowName)}`;
+
+      streamWrap.appendChild(img);
+      tile.appendChild(header);
+      tile.appendChild(streamWrap);
+      grid.appendChild(tile);
+      tiles.set(windowName, tile);
+    }
+
+    function removeTile(windowName) {
+      const tile = tiles.get(windowName);
+      if (!tile) {
+        return;
+      }
+      const img = tile.querySelector('img');
+      if (img) {
+        img.src = '';
+      }
+      tile.remove();
+      tiles.delete(windowName);
+    }
+
+    function renderWindows(windowNames) {
+      const nextNames = new Set(windowNames);
+
+      for (const existingName of Array.from(tiles.keys())) {
+        if (!nextNames.has(existingName)) {
+          removeTile(existingName);
+        }
+      }
+
+      for (const windowName of windowNames) {
+        if (!tiles.has(windowName)) {
+          createTile(windowName);
+        }
+      }
+
+      updateLayout(windowNames.length);
+      emptyState.style.display = windowNames.length ? 'none' : 'block';
+    }
+
+    async function refreshWindows() {
+      const response = await fetch('/windows');
+      const data = await response.json();
+      renderWindows(data.windows || []);
+    }
+
+    window.addEventListener('resize', () => updateLayout(tiles.size));
+
+    refreshWindows();
+    setInterval(refreshWindows, 1000);
+  </script>
+</body>
+</html>

@@ -14,7 +14,7 @@ from pyorbbecsdk import (
     OBFrameType,
 )
 
-from utils import frame_to_bgr_image
+from camera_utils import frame_to_bgr_image
 import argparse
 import time, json, threading
 from flask import Flask, Response
@@ -270,8 +270,6 @@ def display_stream():
     # Initialize camera
     pipeline = setup_camera()
     imu_pipeline = setup_imu()
-    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(WINDOW_NAME, DISPLAY_WIDTH, DISPLAY_HEIGHT)
     while True:
         # Get all frames
         frames = pipeline.wait_for_frames(100)
@@ -306,15 +304,15 @@ def display_stream():
 
         # create display
         display = create_display(processed_frames, DISPLAY_WIDTH, DISPLAY_HEIGHT)
-        cv2.imshow(WINDOW_NAME, display)
+        show_image(WINDOW_NAME, display)
 
         # check exit key
-        key = cv2.waitKey(1) & 0xFF
+        key = poll_key(1) & 0xFF
         if key in [ord('q'), 27]:  # q or ESC
             break
 
     pipeline.stop()
-    cv2.destroyAllWindows()
+    destroy_all_windows()
 
 class TemporalFilter:
     def __init__(self, alpha):
@@ -670,7 +668,9 @@ def main():
         "--port", type=int, default=8083, help="Port to bind the server"
     )
     parser.add_argument("--idx", type=int, default=4, help="camera index")
-    parser.add_argument("--mode", type=str, default="multi", help="Video source (default: rgb)")
+    parser.add_argument(
+        "--mode", type=str, default="multi", help="Video source (default: multi)"
+    )
     args = parser.parse_args()
     if args.mode == "none":
         display_stream()

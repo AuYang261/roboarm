@@ -2,6 +2,7 @@
 # 导入CV2模块
 import cv2
 import wmi
+from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 def extract_vid_pid(hardware_id: str) -> str:
     """ 从硬件ID中提取VID和PID部分
@@ -53,21 +54,19 @@ def usb_camera_show(camera_index = 1):
     # 选择摄像头的编号
     cap = cv2.VideoCapture(camera_index)
     # 添加这句是可以用鼠标拖动弹出的窗体
-    cv2.namedWindow('real_img', cv2.WINDOW_NORMAL)
-    
     print("Press 'q' to exit")
     
     while(cap.isOpened()):
         # 读取摄像头的画面
         ret, frame = cap.read()
         # 真实图
-        cv2.imshow('real_img', frame)
+        show_image('real_img', frame)
         # 按下'q'就退出
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if poll_key(1) & 0xFF == ord('q'):
             break
     # 释放画面
     cap.release()
-    cv2.destroyAllWindows()
+    destroy_all_windows()
 
 if __name__ == '__main__':
     
@@ -89,7 +88,8 @@ if __name__ == '__main__':
     
     camera_list = get_camera_list()
     print(camera_list)
-    
-    usb_camera_capture(4)
-    
-    usb_camera_show(4)
+    for i in range(len(camera_list)):
+        try:
+            usb_camera_capture(i)
+        except Exception as e:
+            print(f"Error occurred while capturing camera {i}: {e}")

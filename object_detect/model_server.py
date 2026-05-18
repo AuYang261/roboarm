@@ -7,6 +7,7 @@ import time
 import os
 import argparse
 import sys
+from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 def detect_objects_in_frame(model, frame, conf_thres=0.8, iou_thres=0.45):
     results = model(frame, conf=conf_thres, iou=iou_thres)[0]
@@ -107,11 +108,11 @@ def web_model_server(model_path, host : str, port : int, conf_thres :float, iou_
             2,
         )
         
-        cv2.imshow("YOLOv8 Object Detection", annotated_frame)
-        if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
+        show_image("YOLOv8 Object Detection", annotated_frame)
+        if poll_key(1) & 0xFF == 27:  # Press 'ESC' to exit
             break
     cap.release()
-    cv2.destroyAllWindows()
+    destroy_all_windows()
 
 
 def main():

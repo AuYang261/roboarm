@@ -3,8 +3,8 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import cv2
-import yaml
-
+from utils.config_getter import get_config_value
+from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 class Camera:
 
@@ -13,14 +13,8 @@ class Camera:
         color: bool = True,
         depth: bool = False,
     ):
-        config = yaml.safe_load(
-            open(
-                os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml"),
-                encoding="utf-8",
-            )
-        )
-        self.ip = config.get("camera_ip", "")
-        self.port = config.get("camera_port", None)
+        self.ip = get_config_value("camera_ip", "", False)
+        self.port = get_config_value("camera_port", None, False)
         self.color = color
         self.depth = depth
         self.pipeline = None
@@ -41,7 +35,7 @@ class Camera:
                 self.ip, self.port, self.color, self.depth
             )
 
-    def get_frames(self) -> dict:
+    def get_frames(self) -> dict[str, cv2.typing.MatLike | None]:
         if not self.ip:
             return self.orb_camera.get_frames(self.pipeline)
         else:
@@ -65,18 +59,19 @@ def main():
 
     camera = Camera(color=True, depth=False)
 
-    frame_rgb, frame_depth = camera.get_frames()
+    frames = camera.get_frames()
+    frame_rgb = frames.get("color")
+    frame_depth = frames.get("depth")
 
-    cv2.namedWindow('Camera Client', cv2.WINDOW_NORMAL)
-    cv2.imshow('Camera Client', frame_rgb if frame_rgb is not None else frame_depth)
+    show_image("Camera Client", frame_rgb if frame_rgb is not None else frame_depth)
 
     print("Press 'q' to exit")
     while True:
-        key = cv2.waitKey(1)
+        key = poll_key(1)
         if key == ord('q'):
             break
 
-    cv2.destroyAllWindows()
+    destroy_all_windows()
 
 
 if __name__ == "__main__":

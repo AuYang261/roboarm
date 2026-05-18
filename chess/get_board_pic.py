@@ -10,6 +10,12 @@ from requests import get
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from camera.camera_api import Camera
+from utils.cv2_display import (
+    show_image,
+    poll_key,
+    set_mouse_callback,
+    destroy_all_windows,
+)
 
 
 POINTS = []
@@ -31,8 +37,7 @@ def get_4_corners(cap: Camera):
 
     # 创建窗口并绑定鼠标回调函数
     window_name = "Camera"
-    cv2.namedWindow(window_name)
-    cv2.setMouseCallback(window_name, mouse_callback)
+    set_mouse_callback(window_name, mouse_callback)
 
     while True:
         frames = cap.get_frames()
@@ -66,13 +71,13 @@ def get_4_corners(cap: Camera):
             1,
         )
         # Display the resulting frame
-        cv2.imshow("USB Camera", color_frame)
+        show_image("USB Camera", color_frame)
 
         # Exit on 'q' key
-        if cv2.waitKey(1) & 0xFF == ord("q"):
+        if poll_key(1) & 0xFF == ord("q"):
             break
 
-    cv2.destroyAllWindows()
+    destroy_all_windows()
 
     # save POINTS
     with open("points.txt", "w") as f:
@@ -122,8 +127,8 @@ def main():
     )
     print(f"Padded points: {POINTS_PADDED}")
     # 根据4角点计算仿射变换矩阵
-    pts1 = np.float32(np.array(POINTS_PADDED))
-    pts2 = np.float32(np.array([(0, 0), (width, 0), (width, height), (0, height)]))
+    pts1 = np.array(POINTS_PADDED, dtype=np.float32)
+    pts2 = np.array([(0, 0), (width, 0), (width, height), (0, height)], dtype=np.float32)
     M = cv2.getPerspectiveTransform(pts1, pts2)
 
     while True:
@@ -135,10 +140,10 @@ def main():
         # 仿射变换
         frame = cv2.warpPerspective(color_frame, M, (width, height))
 
-        cv2.imshow("USB Camera", frame)
+        show_image("USB Camera", frame)
 
         # Exit on 'q' key
-        if cv2.waitKey(1) & 0xFF == ord("q"):
+        if poll_key(1) & 0xFF == ord("q"):
             break
     cap.close()
 

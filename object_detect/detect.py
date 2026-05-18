@@ -1,4 +1,3 @@
-import yaml
 from ultralytics import YOLO
 import cv2
 import numpy as np
@@ -7,8 +6,9 @@ import os
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from utils.config_getter import get_config_value
 from camera.camera_api import Camera
-
+from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 def detect_objects_in_frame(model, frame, conf_thres=0.8, iou_thres=0.45):
     results = model(frame, conf=conf_thres, iou=iou_thres)[0]
@@ -47,20 +47,11 @@ def load_model(model_path, device=""):
 
 
 def main():
-    config_yaml = yaml.safe_load(
-        open(
-            os.path.join(
-                os.path.dirname(os.path.dirname(__file__)),
-                "config.yaml",
-            ),
-            encoding="utf-8",
-        )
-    )
     model_paths = [
         os.path.join(os.path.dirname(os.path.dirname(__file__)), path)
-        for path in config_yaml.get("classification_YOLO_model_path", [])
+        for path in get_config_value("classification_YOLO_model_path", [])
     ]
-    default_conf_thres = config_yaml.get("default_conf_thres", 0.8)
+    default_conf_thres = get_config_value("default_conf_thres")
 
     # Load model
     model = load_model(model_paths[0])
@@ -104,11 +95,11 @@ def main():
             (0, 255, 0),
             2,
         )
-        cv2.imshow("YOLOv11-obb Object Detection", annotated_frame)
-        if cv2.waitKey(1) & 0xFF == 27:  # Press 'ESC' to exit
+        show_image("YOLOv11-obb Object Detection", annotated_frame)
+        if poll_key(1) & 0xFF == 27:  # Press 'ESC' to exit
             break
     camera.close()
-    cv2.destroyAllWindows()
+    destroy_all_windows()
 
 
 if __name__ == "__main__":

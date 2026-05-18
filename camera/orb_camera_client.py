@@ -2,12 +2,11 @@
 
 import cv2
 import threading
-import time
 import requests
-import numpy as np
 import argparse
 import json
 import signal
+from utils.cv2_display import show_image, poll_key, destroy_window, destroy_all_windows
 
 # Global stop event for graceful shutdown
 stop_event = threading.Event()
@@ -43,7 +42,6 @@ def start_rgb_client(host: str, port: int):
         print("Error: Unable to open rgb stream")
         return
 
-    cv2.namedWindow('Web Camera Client RGB', cv2.WINDOW_NORMAL)
     print("Press 'q' to exit")
     
     err_count = 0
@@ -68,14 +66,14 @@ def start_rgb_client(host: str, port: int):
         # cv2 上打印
         cv2.putText(frame, f"FPS: {fps}, Resolution: {int(width)}x{int(height)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-        cv2.imshow('Web Camera Client RGB', frame)
-        
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        show_image('Web Camera Client RGB', frame)
+
+        if poll_key(1) & 0xFF == ord('q'):
             break
 
     cap.release()
     # 只摧毁当前窗口
-    cv2.destroyWindow('Web Camera Client RGB')
+    destroy_window('Web Camera Client RGB')
 
 def start_depth_client(host: str, port: int):
     url = f"http://{host}:{port}/depth_stream"
@@ -87,7 +85,6 @@ def start_depth_client(host: str, port: int):
         print("Error: Unable to open depth stream")
         return
 
-    cv2.namedWindow('Web Camera Client Depth', cv2.WINDOW_NORMAL)
     print("Press 'q' to exit")
 
     err_count = 0
@@ -110,13 +107,13 @@ def start_depth_client(host: str, port: int):
         # cv2 上打印
         cv2.putText(frame, f"FPS: {fps}, Resolution: {int(width)}x{int(height)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-        cv2.imshow('Web Camera Client Depth', frame)
-        
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        show_image('Web Camera Client Depth', frame)
+
+        if poll_key(1) & 0xFF == ord('q'):
             break
 
     cap.release()
-    cv2.destroyWindow('Web Camera Client Depth')
+    destroy_window('Web Camera Client Depth')
 
 # 存在问题，传输速度过慢
 def start_dict_client(host: str, port: int):
@@ -198,7 +195,6 @@ def start_usb_camera_client(host: str, port: int):
         print("Error: Unable to open video stream")
         return
 
-    cv2.namedWindow('Web Camera Client', cv2.WINDOW_NORMAL)
     print("Press 'q' to exit")
 
     while True:
@@ -215,20 +211,22 @@ def start_usb_camera_client(host: str, port: int):
         # cv2 上打印
         cv2.putText(frame, f"FPS: {fps}, Resolution: {int(width)}x{int(height)}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
-        cv2.imshow('Web Camera Client', frame)
+        show_image('Web Camera Client', frame)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if poll_key(1) & 0xFF == ord('q'):
             break
 
     cap.release()
-    cv2.destroyAllWindows()
+    destroy_all_windows()
 
 
 def main():
     parser = argparse.ArgumentParser(description="Web Camera Client")
     parser.add_argument("--host", type=str, default="localhost", help="Server host")
     parser.add_argument("--port", type=int, default=8083, help="Server port")
-    parser.add_argument("--mode", type=str, default="multi", help="Video source (default: rgb)")
+    parser.add_argument(
+        "--mode", type=str, default="multi", help="Video source (default: multi)"
+    )
     args = parser.parse_args()
 
     if args.mode == "none":

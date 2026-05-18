@@ -1,0 +1,96 @@
+<mujoco model="low_cost_robot">
+  <compiler angle="radian" meshdir="./" />
+  
+  <default>
+    <joint type="hinge" limited="true" range="-3.14159 3.14159" frictionloss="0.5" damping="2.0" />
+    <position ctrllimited="true" ctrlrange="-3.14159 3.14159" forcelimited="true" forcerange="-7 7" kp="15" />
+  </default>
+  
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="512" />
+    
+    <texture name="texplane" type="2d" builtin="flat" rgb1="0 0 0" rgb2="0 0 0" width="1" height="1" />
+    <material name="matplane" reflectance="0" texture="texplane" texrepeat="1 1" texuniform="true" />
+
+    <mesh name="base_link" content_type="model/stl" file="base_link.stl" scale="0.001 0.001 0.001" />
+    <mesh name="link1_1" content_type="model/stl" file="link1_1.stl" scale="0.001 0.001 0.001" />
+    <mesh name="link2_1" content_type="model/stl" file="link2_1.stl" scale="0.001 0.001 0.001" />
+    <mesh name="link3_1" content_type="model/stl" file="link3_1.stl" scale="0.001 0.001 0.001" />
+    <mesh name="link4_1" content_type="model/stl" file="link4_1.stl" scale="0.001 0.001 0.001" />
+    <mesh name="gripper_static_1" content_type="model/stl" file="gripper_static_1.stl" scale="0.001 0.001 0.001" />
+    <mesh name="gripper_moving_1" content_type="model/stl" file="gripper_moving_1.stl" scale="0.001 0.001 0.001" />
+  </asset>
+
+  <worldbody>
+  
+<light directional="true" diffuse=".5 .5 .5" specular="0 0 0" pos="0 5 2" dir="0 -1 -0.2" castshadow="false" />
+<light directional="true" diffuse=".5 .5 .5" specular="0 0 0" pos="0 -5 2" dir="0 1 -0.2" castshadow="false" />
+<light directional="true" diffuse=".45 .45 .45" specular="0 0 0" pos="5 0 2" dir="-1 0 -0.2" castshadow="false" />
+<light directional="true" diffuse=".45 .45 .45" specular="0 0 0" pos="-5 0 2" dir="1 0 -0.2" castshadow="false" />
+
+    <geom name="floor" pos="0 0 0" size="15 15 1" type="plane" material="matplane" margin="0.001" condim="3" friction="1 0.005 0.0001" />
+
+    <geom type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="base_link" />
+    <geom type="mesh" mesh="base_link" />
+    <body name="link1_1" pos="0 0 0.039">
+      <inertial pos="-0.000621664 -0.0119142 0.0154002" quat="0.494768 0.505178 -0.505178 0.494768" mass="0.395606" diaginertia="0.000123021 0.000112 7.49792e-05" />
+      <joint name="joint1" pos="0 0 0" axis="0 0 1" />
+
+      <geom pos="0 0 -0.039" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="link1_1" />
+      <geom pos="0 0 -0.039" quat="1 0 0 0" type="mesh" mesh="link1_1" />
+
+      <body name="link2_1" pos="-0.0002 0 0.0173">
+        <inertial pos="0.000157789 -0.00121683 0.0716118" quat="0.689118 -0.0263852 0.0311302 0.723499" mass="0.391607" diaginertia="0.000537063 0.000519969 8.09683e-05" />
+        
+        <joint name="joint2" pos="0 0 0" axis="-1 0 0" />
+        <geom pos="0.0002 0 -0.0563" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="link2_1" />
+        <geom pos="0.0002 0 -0.0563" quat="1 0 0 0" type="mesh" mesh="link2_1" />
+
+        <body name="link3_1" pos="0.00025 0.014791 0.108347">
+          <inertial pos="7.24367e-05 0.0506989 0.0028508" quat="0.501011 0.498987 -0.501011 0.498987" mass="0.440469" diaginertia="0.000322 0.000302004 5.4996e-05" />
+          <joint name="joint3" pos="0 0 0" axis="1 0 0" />
+          <geom pos="-5e-05 -0.014791 -0.164647" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="link3_1" />
+          <geom pos="-5e-05 -0.014791 -0.164647" quat="1 0 0 0" type="mesh" mesh="link3_1" />
+          <body name="link4_1" pos="0.000125 0.090467 0.002747">
+            <inertial pos="-0.00473856 8.6083e-06 -0.0265782" quat="0.653281 0.270598 0.270598 0.653281" mass="0.154644" diaginertia="3.9e-05 2.7e-05 2.1e-05" />
+            <joint name="joint4" pos="0 0 0" axis="1 0 0" />
+            
+            <camera name="arm_cam" pos="0 0.06 0" xyaxes="1 0 0 0 0.8 -0.6" />
+            <geom pos="-0.000175 -0.105258 -0.167394" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="link4_1" />
+            <geom pos="-0.000175 -0.105258 -0.167394" quat="1 0 0 0" type="mesh" mesh="link4_1" />
+            <body name="gripper_static_1" pos="0.001353 7e-06 -0.045">
+              <inertial pos="0.00544111 0.000115633 -0.0190522" quat="0.687452 -0.165558 -0.165558 0.687452" mass="0.230086" diaginertia="8.4e-05 7.82036e-05 3.37964e-05" />
+              <joint name="joint5" pos="0 0 0" axis="0 0 -1" />
+              
+              <camera name="gripper_cam" pos="0.0 0.22 0.1" xyaxes="0.9970578168694106 -0.01867699656957768 0.07434298634535064 0.063596955841988 0.7429867649741103 -0.6662777906256057" />
+              <geom pos="-0.001528 -0.105265 -0.122394" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="gripper_static_1" />
+              <geom pos="-0.001528 -0.105265 -0.122394" quat="1 0 0 0" type="mesh" mesh="gripper_static_1" />
+              <body name="gripper_moving_1" pos="-0.0074 -0.00025 -0.01315">
+                <inertial pos="0.0010956 0.000310904 -0.0251131" quat="0.997878 0 -0.0651045 0" mass="0.100606" diaginertia="2.72621e-05 1.9e-05 1.17379e-05" />
+                <joint name="joint_gripper" pos="0 0 0" axis="0 -1 0" range="0 1.74533" />
+                <geom pos="0.005872 -0.105015 -0.109244" type="mesh" contype="0" conaffinity="0" group="1" density="0" mesh="gripper_moving_1" />
+                <geom pos="0.005872 -0.105015 -0.109244" type="mesh" mesh="gripper_moving_1" />
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  
+  <actuator>
+    <position joint="joint1" name="actuator_joint1" />
+    <position joint="joint2" name="actuator_joint2" />
+    <position joint="joint3" name="actuator_joint3" />
+    <position joint="joint4" name="actuator_joint4" />
+    <position joint="joint5" name="actuator_joint5" />
+    <position joint="joint_gripper" name="actuator_gripper" ctrlrange="-1.3962634 0" />
+  </actuator>
+
+  
+  <keyframe>
+    <key name="home" qpos="0 0 0 0.5 0 -1.1" ctrl="0 0 0 0 0 0" />
+  </keyframe>
+
+</mujoco>

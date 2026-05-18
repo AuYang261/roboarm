@@ -1,19 +1,23 @@
 __pycache__/
 .vscode/
+.claude/
 calibration/
 dataset/
 runs/
 yolov11/
-
-*.log
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.bmp
-*.tiff
+temfile/
+classification/dataset_process/
+temp/
+comparison_results/
+sim/isaacSimKoch/
+IsaacLabs/
+tmp/
+sim/camera_simple_opt_output/
+sim/koch_img/
+recordings/
 
 *.txt
+.env
 !requirements.txt
 
 cmd
@@ -22,3 +26,9 @@ cmd
 
 config.yaml
 object_detect/data.yaml
+
+*.jpg
+*.mp3
+*.mp4
+*.wav
+*.zip
