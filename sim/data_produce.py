@@ -136,6 +136,7 @@ def collect_episode(
     rng: np.random.Generator,
     args: argparse.Namespace,
 ) -> Path:
+    start = time.time()
     sim_client: SimArmClient = getattr(arm, "sim_arm_client")
     if sim_client is None:
         raise RuntimeError(
@@ -212,7 +213,11 @@ def collect_episode(
         place_position=place_position,
         error=error,
     )
-    print("catch and place task", "success" if success else "failed")
+    print(
+        "catch_and_place task",
+        "success" if success else "failed",
+        f"used {time.time()-start:.2f}s",
+    )
     return path
 
 
