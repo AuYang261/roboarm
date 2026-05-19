@@ -74,6 +74,9 @@
       height: auto;
       object-fit: contain;
       background: #000;
+      cursor: crosshair;
+      user-select: none;
+      -webkit-user-drag: none;
     }
     .hint {
       color: #aaa;
@@ -91,6 +94,213 @@
     const grid = document.getElementById('grid');
     const emptyState = document.getElementById('emptyState');
     const tiles = new Map();
+
+    // OpenCV mouse event codes (cv2.EVENT_*)
+    const CV_EVENT = {
+      MOUSEMOVE: 0,
+      LBUTTONDOWN: 1,
+      RBUTTONDOWN: 2,
+      MBUTTONDOWN: 3,
+      LBUTTONUP: 4,
+      RBUTTONUP: 5,
+      MBUTTONUP: 6,
+      LBUTTONDBLCLK: 7,
+      RBUTTONDBLCLK: 8,
+      MBUTTONDBLCLK: 9,
+      MOUSEWHEEL: 10,
+      MOUSEHWHEEL: 11,
+    };
+    const CV_FLAG = {
+      LBUTTON: 1,
+      RBUTTON: 2,
+      MBUTTON: 4,
+      CTRL: 8,
+      SHIFT: 16,
+      ALT: 32,
+    };
+
+    function buttonDownEvent(button) {
+      if (button === 0) return CV_EVENT.LBUTTONDOWN;
+      if (button === 1) return CV_EVENT.MBUTTONDOWN;
+      if (button === 2) return CV_EVENT.RBUTTONDOWN;
+      return null;
+    }
+
+    function buttonUpEvent(button) {
+      if (button === 0) return CV_EVENT.LBUTTONUP;
+      if (button === 1) return CV_EVENT.MBUTTONUP;
+      if (button === 2) return CV_EVENT.RBUTTONUP;
+      return null;
+    }
+
+    function buttonDblEvent(button) {
+      if (button === 0) return CV_EVENT.LBUTTONDBLCLK;
+      if (button === 1) return CV_EVENT.MBUTTONDBLCLK;
+      if (button === 2) return CV_EVENT.RBUTTONDBLCLK;
+      return null;
+    }
+
+    function modifierFlags(e) {
+      let f = 0;
+      // buttons is a bitmask: 1=L, 2=R, 4=M
+      if (e.buttons & 1) f |= CV_FLAG.LBUTTON;
+      if (e.buttons & 2) f |= CV_FLAG.RBUTTON;
+      if (e.buttons & 4) f |= CV_FLAG.MBUTTON;
+      if (e.ctrlKey || e.metaKey) f |= CV_FLAG.CTRL;
+      if (e.shiftKey) f |= CV_FLAG.SHIFT;
+      if (e.altKey) f |= CV_FLAG.ALT;
+      return f;
+    }
+
+    // Map a mouse event on the <img> element to the original image pixel
+    // coordinates, accounting for object-fit: contain letterboxing.
+    function imagePixel(img, e) {
+      const rect = img.getBoundingClientRect();
+      const naturalW = img.naturalWidth || rect.width;
+      const naturalH = img.naturalHeight || rect.height;
+      if (!naturalW || !naturalH || !rect.width || !rect.height) {
+        return null;
+      }
+      const scale = Math.min(rect.width / naturalW, rect.height / naturalH);
+      const drawW = naturalW * scale;
+      const drawH = naturalH * scale;
+      const offsetX = (rect.width - drawW) / 2;
+      const offsetY = (rect.height - drawH) / 2;
+      const localX = e.clientX - rect.left - offsetX;
+      const localY = e.clientY - rect.top - offsetY;
+      const x = Math.round(localX / scale);
+      const y = Math.round(localY / scale);
+      if (x < 0 || y < 0 || x >= naturalW || y >= naturalH) {
+        return null;
+      }
+      return { x, y };
+    }
+
+    function postMouse(windowName, event, x, y, flags) {
+      fetch(`/mouse/${encodeURIComponent(windowName)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event, x, y, flags }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+
+    // Throttle mouse-move posts to avoid flooding the server.
+    function makeMoveDispatcher(windowName) {
+      let pending = null;
+      let scheduled = false;
+      return (point, flags) => {
+        pending = { point, flags };
+        if (scheduled) return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+          scheduled = false;
+          if (!pending) return;
+          const { point: p, flags: f } = pending;
+          pending = null;
+          postMouse(windowName, CV_EVENT.MOUSEMOVE, p.x, p.y, f);
+        });
+      };
+    }
+
+    function attachMouseHandlers(img, windowName) {
+      const dispatchMove = makeMoveDispatcher(windowName);
+
+      img.addEventListener('contextmenu', (e) => e.preventDefault());
+      img.addEventListener('dragstart', (e) => e.preventDefault());
+
+      img.addEventListener('mousemove', (e) => {
+        const p = imagePixel(img, e);
+        if (!p) return;
+        dispatchMove(p, modifierFlags(e));
+      });
+
+      img.addEventListener('mousedown', (e) => {
+        const code = buttonDownEvent(e.button);
+        if (code === null) return;
+        const p = imagePixel(img, e);
+        if (!p) return;
+        e.preventDefault();
+        postMouse(windowName, code, p.x, p.y, modifierFlags(e));
+      });
+
+      img.addEventListener('mouseup', (e) => {
+        const code = buttonUpEvent(e.button);
+        if (code === null) return;
+        const p = imagePixel(img, e);
+        if (!p) return;
+        postMouse(windowName, code, p.x, p.y, modifierFlags(e));
+      });
+
+      img.addEventListener('dblclick', (e) => {
+        const code = buttonDblEvent(e.button);
+        if (code === null) return;
+        const p = imagePixel(img, e);
+        if (!p) return;
+        postMouse(windowName, code, p.x, p.y, modifierFlags(e));
+      });
+
+      img.addEventListener('wheel', (e) => {
+        const p = imagePixel(img, e);
+        if (!p) return;
+        e.preventDefault();
+        const horizontal = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
+        const event = horizontal ? CV_EVENT.MOUSEHWHEEL : CV_EVENT.MOUSEWHEEL;
+        const delta = horizontal ? e.deltaX : e.deltaY;
+        // OpenCV packs the wheel delta into the high 16 bits of flags.
+        const wheelDelta = delta > 0 ? -120 : 120;
+        const flags = (modifierFlags(e) & 0xFFFF) | ((wheelDelta & 0xFFFF) << 16);
+        postMouse(windowName, event, p.x, p.y, flags);
+      }, { passive: false });
+    }
+
+    // Map a JS keydown event to a cv2.waitKey-style key code.
+    const SPECIAL_KEYS = {
+      Enter: 13,
+      Escape: 27,
+      Backspace: 8,
+      Tab: 9,
+      ' ': 32,
+      Delete: 127,
+      ArrowLeft: 81,   // emulate Linux/HighGUI low-byte codes
+      ArrowUp: 82,
+      ArrowRight: 83,
+      ArrowDown: 84,
+      Home: 80,
+      End: 87,
+      PageUp: 85,
+      PageDown: 86,
+    };
+
+    function keyCodeFromEvent(e) {
+      const k = e.key;
+      if (k && k.length === 1) {
+        return k.charCodeAt(0);
+      }
+      if (k in SPECIAL_KEYS) {
+        return SPECIAL_KEYS[k];
+      }
+      return e.keyCode || 0;
+    }
+
+    document.addEventListener('keydown', (e) => {
+      // Ignore modifier-only key events.
+      if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') {
+        return;
+      }
+      const code = keyCodeFromEvent(e);
+      if (!code) return;
+      // Don't swallow browser shortcuts like F5/Ctrl+R/devtools.
+      if (!e.ctrlKey && !e.metaKey && e.key !== 'F5' && !e.key.startsWith('F1')) {
+        e.preventDefault();
+      }
+      fetch('/key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyCode: code }),
+        keepalive: true,
+      }).catch(() => {});
+    });
 
     function updateLayout(windowCount) {
       if (!windowCount) {
@@ -144,7 +354,9 @@
 
       const img = document.createElement('img');
       img.alt = windowName;
+      img.draggable = false;
       img.src = `/stream/${encodeURIComponent(windowName)}`;
+      attachMouseHandlers(img, windowName);
 
       streamWrap.appendChild(img);
       tile.appendChild(header);

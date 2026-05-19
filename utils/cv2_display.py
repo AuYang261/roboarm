@@ -1,11 +1,12 @@
 import atexit
 import os
+import queue
 import threading
 from pathlib import Path
 from typing import Callable, Any
 
 import cv2
-from flask import Flask, Response
+from flask import Flask, Response, request
 
 from utils.config_getter import get_config_value
 
@@ -20,6 +21,9 @@ _HEADLESS_SERVER_PORT = get_config_value(
 _HEADLESS_JPEG_QUALITY = 90
 _HEADLESS_LATEST_FRAMES: dict[str, bytes] = {}
 _HEADLESS_FRAME_EVENTS: dict[str, threading.Event] = {}
+_HEADLESS_KEY_QUEUE: "queue.Queue[int]" = queue.Queue()
+_HEADLESS_MOUSE_LOCK = threading.Lock()
+_HEADLESS_MOUSE_CALLBACKS: dict[str, tuple[Callable[..., Any], Any]] = {}
 
 
 def show_img_by_web() -> bool:
@@ -70,6 +74,37 @@ def _run_headless_server() -> None:
         return Response(
             generate(), mimetype="multipart/x-mixed-replace; boundary=frame"
         )
+
+    @app.post("/key")
+    def key_event():
+        payload = request.get_json(silent=True) or {}
+        key_code = payload.get("keyCode")
+        if not isinstance(key_code, int):
+            return {"ok": False}, 400
+        _HEADLESS_KEY_QUEUE.put(key_code & 0xFFFF)
+        return {"ok": True}
+
+    @app.post("/mouse/<path:window_name>")
+    def mouse_event(window_name: str):
+        payload = request.get_json(silent=True) or {}
+        try:
+            event_code = int(payload["event"])
+            x = int(payload["x"])
+            y = int(payload["y"])
+            flags = int(payload.get("flags", 0))
+        except (KeyError, TypeError, ValueError):
+            return {"ok": False}, 400
+        with _HEADLESS_MOUSE_LOCK:
+            entry = _HEADLESS_MOUSE_CALLBACKS.get(window_name)
+        if entry is None:
+            return {"ok": True, "dispatched": False}
+        callback, param = entry
+        try:
+            callback(event_code, x, y, flags, param)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[cv2_display] mouse callback for {window_name!r} raised: {exc}")
+            return {"ok": False}, 500
+        return {"ok": True, "dispatched": True}
 
     app.run(
         host=_HEADLESS_SERVER_HOST,
@@ -128,27 +163,43 @@ def show_image(window_name: str, image: Any):
 
 def poll_key(delay: int = 1) -> int:
     if show_img_by_web():
-        return -1
+        # delay <= 0 means block forever, matching cv2.waitKey semantics.
+        timeout = None if delay <= 0 else delay / 1000.0
+        try:
+            return _HEADLESS_KEY_QUEUE.get(timeout=timeout)
+        except queue.Empty:
+            return -1
     return cv2.waitKey(delay)
 
 
-def set_mouse_callback(window_name: str, callback: Callable[..., Any]):
+def set_mouse_callback(
+    window_name: str,
+    callback: Callable[..., Any],
+    param: Any = None,
+):
     if show_img_by_web():
+        _ensure_headless_server()
+        with _HEADLESS_MOUSE_LOCK:
+            _HEADLESS_MOUSE_CALLBACKS[window_name] = (callback, param)
         return
     if window_name not in _WINDOW_READY:
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
         _WINDOW_READY.add(window_name)
-    cv2.setMouseCallback(window_name, callback)
+    cv2.setMouseCallback(window_name, callback, param)
 
 
 def destroy_all_windows():
     if show_img_by_web():
+        with _HEADLESS_MOUSE_LOCK:
+            _HEADLESS_MOUSE_CALLBACKS.clear()
         return
     cv2.destroyAllWindows()
 
 
 def destroy_window(window_name: str):
     if show_img_by_web():
+        with _HEADLESS_MOUSE_LOCK:
+            _HEADLESS_MOUSE_CALLBACKS.pop(window_name, None)
         return
     cv2.destroyWindow(window_name)
     _WINDOW_READY.discard(window_name)
