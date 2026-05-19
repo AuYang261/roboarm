@@ -6,7 +6,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from typing import Union, List
 from collections.abc import Sequence
-from arm.arm_base import Arm
+from arm.arm_base import Arm, StepCallback
 from utils.config_getter import get_config_value
 import time
 import numpy as np
@@ -108,6 +108,7 @@ class PiperBySDK(Arm):
         self,
         angles_deg: Sequence[float | int] | None = None,
         gripper_open_0to1: float | int | None = None,
+        step_callback: StepCallback | None = None,
     ) -> bool:
         if gripper_open_0to1 is not None:
             if not 0 <= gripper_open_0to1 <= 1:
@@ -158,6 +159,22 @@ class PiperBySDK(Arm):
                 self.set_move_mode(move_mode_end_pose=True)
                 self.move_mode_end_pose = True
 
+        if step_callback is not None:
+            step_callback(
+                {
+                    "target_joint_angles_deg": (
+                        None
+                        if angles_deg is None
+                        else [float(angle) for angle in angles_deg]
+                    ),
+                    "target_gripper_open_0to1": (
+                        None if gripper_open_0to1 is None else float(gripper_open_0to1)
+                    ),
+                    "step_index": 0,
+                    "steps": 1,
+                    "alpha": 1.0,
+                }
+            )
         return True
 
     def get_arm_angles(
@@ -194,11 +211,18 @@ class PiperBySDK(Arm):
             return None, None
 
     def move_to_home(
-        self, gripper_open_0to1: float | None = None, safe_pos: bool = False
+        self,
+        gripper_open_0to1: float | None = None,
+        step_callback: StepCallback | None = None,
+        safe_pos: bool = False,
     ) -> bool:
         """safe_pos表示是否要移动到可安全失能的位置"""
         angles = [0, 0, 0, 0, 25 if safe_pos else 0, 0]
-        return self.set_arm_angles(angles, gripper_open_0to1=gripper_open_0to1)
+        return self.set_arm_angles(
+            angles,
+            gripper_open_0to1=gripper_open_0to1,
+            step_callback=step_callback,
+        )
 
     def move_to(
         self,
@@ -206,6 +230,7 @@ class PiperBySDK(Arm):
         gripper_open_0to1: float | None = None,
         rot_rad: float | int | None = None,
         euler_angles_deg_zyx: list[float] | None = None,
+        step_callback: StepCallback | None = None,
     ) -> bool:
         if len(pos) != 3:
             raise ValueError("位置参数格式错误，应该是[x, y, z]")
@@ -240,10 +265,21 @@ class PiperBySDK(Arm):
             print("逆运动学不收敛，无法到达指定位置")
             return False
         angles_deg = np.rad2deg(result.x).tolist()
-        return self.set_arm_angles(angles_deg, gripper_open_0to1=gripper_open_0to1)
+        return self.set_arm_angles(
+            angles_deg,
+            gripper_open_0to1=gripper_open_0to1,
+            step_callback=step_callback,
+        )
 
-    def set_gripper(self, gripper_open_0to1: float):
-        self.set_arm_angles(gripper_open_0to1=gripper_open_0to1)
+    def set_gripper(
+        self,
+        gripper_open_0to1: float,
+        step_callback: StepCallback | None = None,
+    ):
+        self.set_arm_angles(
+            gripper_open_0to1=gripper_open_0to1,
+            step_callback=step_callback,
+        )
 
     def disconnect_arm(self):
         print("Resetting piper arm to initial state.")
