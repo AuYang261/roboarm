@@ -9,7 +9,7 @@ sys.path.append(
 
 
 import time
-from arm.arm_base import Arm
+from arm.arm_base import Arm, StepCallback
 from sim.sim_client import SimArmClient
 from scipy.optimize import minimize
 from scipy.spatial.transform import Rotation as R
@@ -139,6 +139,7 @@ class LeroboArm(Arm):
         self,
         angles_deg: Sequence[float | int] | None = None,
         gripper_open_0to1: float | None = None,
+        step_callback: StepCallback | None = None,
     ) -> bool:
         joint_names = self._get_joint_names()
         target_joint_angles = None if angles_deg is None else list(angles_deg)
@@ -167,7 +168,7 @@ class LeroboArm(Arm):
         current_gripper_angle_deg = current_gripper_0to1 * self.MAX_GRIPPER_ANGLE_DEG
         desired_gripper_angle_deg = desired_gripper * self.MAX_GRIPPER_ANGLE_DEG
 
-        for alpha in np.linspace(0, 1, self.steps + 1)[1:]:
+        for step_index, alpha in enumerate(np.linspace(0, 1, self.steps + 1)[1:]):
             interp_joint_angles = []
             for current_angle, desired_angle in zip(
                 current_joint_angles, desired_joint_angles, strict=True
@@ -190,17 +191,37 @@ class LeroboArm(Arm):
                     action = {
                         motor_name + ".pos": interp_angle + (self.offset[index])
                         for index, (motor_name, interp_angle) in enumerate(
-                            zip(joint_names, interp_joint_angles, strict=True)
+                            zip(joint_names[:-1], interp_joint_angles, strict=True)
                         )
                     }
                     action["gripper.pos"] = interp_gripper_angle_deg
                     self.arm.send_action(action)
+                if step_callback is not None:
+                    step_callback(
+                        {
+                            "joint_names": list(joint_names),
+                            "target_joint_angles_deg": list(interp_joint_angles),
+                            "target_gripper_open_0to1": float(
+                                interp_gripper_angle_deg
+                                / self.MAX_GRIPPER_ANGLE_DEG
+                            ),
+                            "final_target_joint_angles_deg": list(
+                                desired_joint_angles
+                            ),
+                            "final_target_gripper_open_0to1": float(
+                                desired_gripper
+                            ),
+                            "step_index": int(step_index),
+                            "steps": int(self.steps),
+                            "alpha": float(alpha),
+                        }
+                    )
             except Exception as e:
                 print(f"设置机械臂角度失败: {e}")
                 return False
             time.sleep(0.5 / self.steps)
 
-        if self.arm_backend == "sim":
+        if self.arm_backend == "sim" and angles_deg is not None:
             try:
                 self.sim_arm_client.wait_until_reached(desired_joint_angles)
             except TimeoutError as e:
@@ -261,8 +282,16 @@ class LeroboArm(Arm):
             return
         self.arm.bus.disable_torque()
 
-    def move_to_home(self, gripper_open_0to1: float | None = None) -> bool:
-        return self.set_arm_angles([0, 0, 0, 0, 0], gripper_open_0to1=gripper_open_0to1)
+    def move_to_home(
+        self,
+        gripper_open_0to1: float | None = None,
+        step_callback: StepCallback | None = None,
+    ) -> bool:
+        return self.set_arm_angles(
+            [0, 0, 0, 0, 0],
+            gripper_open_0to1=gripper_open_0to1,
+            step_callback=step_callback,
+        )
 
     def move_to(
         self,
@@ -270,6 +299,7 @@ class LeroboArm(Arm):
         gripper_open_0to1: float | None = None,
         rot_rad: float | int | None = None,
         euler_angles_deg_zyx: list[float] | None = None,
+        step_callback: StepCallback | None = None,
     ) -> bool:
         if not hasattr(self, "chain"):
             raise ValueError("没有机械臂模型，无法使用位置控制")
@@ -290,12 +320,23 @@ class LeroboArm(Arm):
             print("逆运动学不收敛，无法到达指定位置")
             return False
         angles_deg = np.rad2deg(angles_deg.x).tolist()
-        if not self.set_arm_angles(angles_deg, gripper_open_0to1=gripper_open_0to1):
+        if not self.set_arm_angles(
+            angles_deg,
+            gripper_open_0to1=gripper_open_0to1,
+            step_callback=step_callback,
+        ):
             return False
         return True
 
-    def set_gripper(self, gripper_open_0to1: float):
-        self.set_arm_angles(gripper_open_0to1=gripper_open_0to1)
+    def set_gripper(
+        self,
+        gripper_open_0to1: float,
+        step_callback: StepCallback | None = None,
+    ):
+        self.set_arm_angles(
+            gripper_open_0to1=gripper_open_0to1,
+            step_callback=step_callback,
+        )
 
 
 if __name__ == "__main__":
