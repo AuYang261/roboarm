@@ -14,9 +14,6 @@ class SimArmClient:
         self.timeout_s = get_config_value(
             "arm_sim_timeout_s", 3.0, raise_if_missing=False
         )
-        self.reach_mse_threshold = float(
-            get_config_value("arm_sim_reach_mse_threshold_deg2")
-        )
 
     def _request(
         self,
@@ -90,40 +87,6 @@ class SimArmClient:
                 "gripper_open_0to1": float(gripper_open_0to1),
             },
         )
-
-    def wait_until_reached(self, target_angles_deg: Sequence[float]) -> None:
-        """轮询 /state 直到当前关节角与目标关节角的均方差小于阈值，或超时。
-
-        Args:
-            target_angles_deg: 期望最终到达的关节角列表，单位为度。
-
-        Raises:
-            TimeoutError: 在 `timeout_s` 内未达到阈值。
-            RuntimeError: 仿真服务返回的关节数与目标关节数不一致。
-        """
-        target = [float(angle) for angle in target_angles_deg]
-        deadline = time.monotonic() + self.timeout_s
-        while True:
-            current_angles_deg, _ = self.get_raw_joint_angles()
-            if len(current_angles_deg) != len(target):
-                raise RuntimeError(
-                    "仿真服务返回的关节数与目标关节数不一致: "
-                    f"{len(current_angles_deg)} vs {len(target)}"
-                )
-            squared_errors = [
-                (current - desired) ** 2
-                for current, desired in zip(current_angles_deg, target, strict=True)
-            ]
-            mse = sum(squared_errors) / len(squared_errors)
-            if mse <= self.reach_mse_threshold:
-                return
-            if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"等待仿真机械臂到位超时: 当前 MSE={mse:.4f} deg^2, "
-                    f"阈值={self.reach_mse_threshold} deg^2, "
-                    f"超时={self.timeout_s}s"
-                )
-            time.sleep(0.1)
 
     def set_torque_enabled(self, enabled: bool) -> None:
         self._request("POST", "/torque", {"enabled": bool(enabled)})

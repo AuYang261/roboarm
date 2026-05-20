@@ -36,7 +36,6 @@ class LeroboArm(Arm):
         hand_eye_calibration_file=os.path.join(
             os.path.dirname(__file__), "hand-eye-data/2d_homography.npy"
         ),
-        steps=20,
     ):
         """初始化 LeRobot 机械臂控制器。
 
@@ -50,7 +49,7 @@ class LeroboArm(Arm):
         self.arm_backend = get_config_value(
             "arm_backend", "real", raise_if_missing=False
         )
-        self.steps = steps
+        self.steps = 20
         self.offset = (
             get_config_value("arm_offset") if self.arm_backend != "sim" else [0] * 5
         )
@@ -223,7 +222,7 @@ class LeroboArm(Arm):
 
         if self.arm_backend == "sim" and angles_deg is not None:
             try:
-                self.sim_arm_client.wait_until_reached(desired_joint_angles)
+                self.wait_until_reached(desired_joint_angles)
             except TimeoutError as e:
                 print(f"仿真机械臂未在超时内到达目标位姿: {e}")
                 return False

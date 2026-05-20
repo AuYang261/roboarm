@@ -68,6 +68,7 @@ class Arm:
         Args:
             hand_eye_calibration_file: 2D 手眼标定矩阵文件路径。
         """
+        self.timeout_s = 3
         self.desktop_height = get_config_value("default_desktop_height")
         self.catch_raise_height = get_config_value("catch_raise_height", 0.1)
         self.place_raise_height = get_config_value("place_raise_height", 0.1)
@@ -76,6 +77,10 @@ class Arm:
         )
         self.catch_time_interval_s = get_config_value("catch_time_interval_s")
         self.get_arm_angles_retry_times = get_config_value("get_arm_angles_retry_times")
+
+        self.reach_mse_threshold = float(
+            get_config_value("arm_reach_mse_threshold_deg2")
+        )
         if os.path.exists(hand_eye_calibration_file):
             self.hand_eye_calibration_matrix = np.load(hand_eye_calibration_file)
 
@@ -187,6 +192,42 @@ class Arm:
             移动是否成功。
         """
         raise NotImplementedError("move_to method must be implemented in subclass")
+
+    def wait_until_reached(self, target_angles_deg: Sequence[float]) -> None:
+        """轮询 /state 直到当前关节角与目标关节角的均方差小于阈值，或超时。
+
+        Args:
+            target_angles_deg: 期望最终到达的关节角列表，单位为度。
+
+        Raises:
+            TimeoutError: 在 `timeout_s` 内未达到阈值。
+            RuntimeError: 仿真服务返回的关节数与目标关节数不一致。
+        """
+        target = [float(angle) for angle in target_angles_deg]
+        deadline = time.monotonic() + self.timeout_s
+        while True:
+            current_angles_deg, _ = self.get_raw_joint_angles()
+            if current_angles_deg is None:
+                continue
+            if len(current_angles_deg) != len(target):
+                raise RuntimeError(
+                    "仿真服务返回的关节数与目标关节数不一致: "
+                    f"{len(current_angles_deg)} vs {len(target)}"
+                )
+            squared_errors = [
+                (current - desired) ** 2
+                for current, desired in zip(current_angles_deg, target, strict=True)
+            ]
+            mse = sum(squared_errors) / len(squared_errors)
+            if mse <= self.reach_mse_threshold:
+                return
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"等待仿真机械臂到位超时: 当前 MSE={mse:.4f} deg^2, "
+                    f"阈值={self.reach_mse_threshold} deg^2, "
+                    f"超时={self.timeout_s}s"
+                )
+            time.sleep(0.1)
 
     def set_gripper(
         self,
@@ -377,7 +418,7 @@ class Arm:
         target_x: float,
         target_y: float,
         catch_rotate_rad: float,
-        place_pos: list[float | int] = [0.2, 0.0],
+        place_pos: list[float | int],
         height: float = inf,
         place_rotate_rad: float = 0,
         step_callback: StepCallback | None = None,

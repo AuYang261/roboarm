@@ -15,6 +15,7 @@ from camera.camera_api import Camera
 import cv2
 import time
 import concurrent.futures
+import copy
 from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 def main():
@@ -27,8 +28,10 @@ def main():
         "default_gripper_aside_pos", raise_if_missing=False
     )
     default_conf_thres = get_config_value("default_conf_thres")
-    class_pos = get_config_value("class_pos")
-    place_distance_threshold = get_config_value("place_distance_threshold")
+    place_pos = get_config_value("place_pos", default={}, raise_if_missing=False)
+    place_distance_threshold = get_config_value(
+        "place_distance_threshold", default=0, raise_if_missing=False
+    )
     offset = get_config_value("catch_offset")
 
     arm = Arm()
@@ -48,6 +51,7 @@ def main():
             if frame is None:
                 continue
 
+            frame_w, frame_h = frame.shape[:2]
             if future is None or future.done():
                 detections = []
                 for model in models:
@@ -64,13 +68,32 @@ def main():
                     gripper_angle_rad = arm.gripper_angle_by_longer(
                         u, v, w, h, angle_deg
                     )
+                    class_place_pos = copy.deepcopy(place_pos.get(class_name, None))
+                    if class_place_pos is None or "pos" not in class_place_pos:
+                        print("No placement location specified, place in origin.")
+                        class_place_pos = {"pos": [target_x, target_y]}
+                    else:
+                        match class_place_pos["pos"][0]:
+                            case "x":
+                                class_place_pos["pos"][0] = target_x
+                            case "-x":
+                                class_place_pos["pos"][0] = -target_x
+                            case "y":
+                                class_place_pos["pos"][0] = target_y
+                            case "-y":
+                                class_place_pos["pos"][0] = -target_y
+                        match class_place_pos["pos"][1]:
+                            case "x":
+                                class_place_pos["pos"][1] = target_x
+                            case "-x":
+                                class_place_pos["pos"][1] = -target_x
+                            case "y":
+                                class_place_pos["pos"][1] = target_y
+                            case "-y":
+                                class_place_pos["pos"][1] = -target_y
                     if (
                         np.linalg.norm(
-                            np.array(
-                                class_pos.get(class_name, {"pos": [-0.2, 0.0]}).get(
-                                    "pos"
-                                )
-                            )
+                            np.array(class_place_pos.get("pos"))
                             - np.array([target_x, target_y])
                         )
                         < place_distance_threshold
@@ -85,7 +108,7 @@ def main():
                             target_x + offset * np.cos(gripper_angle_rad),
                             target_y + offset * np.sin(-gripper_angle_rad),
                             gripper_angle_rad,
-                            class_pos.get(class_name, {"pos": [-0.2, 0.0]}).get("pos"),
+                            class_place_pos.get("pos"),
                         )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 

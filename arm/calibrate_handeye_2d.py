@@ -564,8 +564,9 @@ def main():
         homography_matrix = np.load(homography_matrix_path)
         print("计算得到的单应性矩阵:")
         print(homography_matrix)
-        for point in points:
-            test_homography(homography_matrix, point)
+        test_handeye_2d(homography_matrix)
+        # for point in points:
+        #     test_homography(homography_matrix, point)
     elif args.mode == "calibrate_board":
         pattern_size = (args.pattern_cols, args.pattern_rows)
         _, _, homography_matrix, inlier_mask = collect_board_correspondences(

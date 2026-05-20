@@ -158,7 +158,7 @@ def catch_by_instruction(
         global arm
         llm_detect = LLMDetect()
         print("Instruction:", instruction)
-        class_pos = get_config_value("class_pos")
+        place_pos = get_config_value("place_pos")
         offset = get_config_value("catch_offset")
         default_gripper_aside_pos = get_config_value(
             "default_gripper_aside_pos", raise_if_missing=False
@@ -201,15 +201,13 @@ def catch_by_instruction(
                             box.box_rotation_deg,
                         )
                         found = False
-                        place_pos = [0.1, 0.0]
-                        class_name = ""
-                        for name, pos in class_pos.items():
+                        class_place_pos = [0.1, 0.0]
+                        for name, pos in place_pos.items():
                             for keyword in pos.get("keywords", []):
                                 if keyword in box.class_name.lower():
                                     print(f"放置到'{name}'区域")
-                                    place_pos = pos.get("pos", place_pos)
+                                    class_place_pos = pos.get("pos", class_place_pos)
                                     found = True
-                                    class_name = name
                                     break
                             if found:
                                 break
@@ -219,7 +217,7 @@ def catch_by_instruction(
                             target_x + offset * np.cos(gripper_angle_rad),
                             target_y + offset * np.sin(-gripper_angle_rad),
                             gripper_angle_rad,
-                            place_pos,
+                            class_place_pos,
                         )
                         record_catch_result(instruction, box.class_name, catch_success)
                         if catch_success and success_callback:
