@@ -285,10 +285,7 @@ class Arm:
             return False
         time.sleep(self.catch_time_interval_s)
 
-        self.set_gripper(
-            gripper_open_0to1=self.default_gripper_close_threshold,
-            step_callback=step_callback,
-        )
+        self.set_gripper(gripper_open_0to1=0, step_callback=step_callback)
         time.sleep(self.catch_time_interval_s)
 
         res = self.move_to(
