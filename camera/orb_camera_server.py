@@ -399,9 +399,9 @@ def start_dict_server(host, port):
     pipeline.stop()
 
 def start_rgb_server(host, port):
-    
+
     sensor_type = OBSensorType.COLOR_SENSOR
-     
+
     config = Config()
     pipeline = Pipeline()
     app = Flask(__name__)
@@ -409,8 +409,6 @@ def start_rgb_server(host, port):
     try:
         profile_list = pipeline.get_stream_profile_list(sensor_type)
         try:
-            # 1280*720
-            # color_profile: VideoStreamProfile = profile_list.get_video_stream_profile(640, 0, OBFormat.RGB, 30)
             color_profile: VideoStreamProfile = profile_list.get_video_stream_profile(1280, 720, OBFormat.RGB, 30)
         except OBError as e:
             print(e)
@@ -422,37 +420,48 @@ def start_rgb_server(host, port):
         return
 
     pipeline.start(config)
-    
-    def generate_frames():
+
+    latest_frame_lock = threading.Lock()
+    latest_frame: dict[str, bytes | None] = {"data": None}
+
+    def capture_loop():
         while True:
             try:
                 frames: FrameSet = pipeline.wait_for_frames(100)
                 if frames is None:
                     continue
-                
                 color_frame = frames.get_color_frame()
                 if color_frame is None:
                     continue
-                
-                # covert to RGB format
                 color_image = frame_to_bgr_image(color_frame)
                 if color_image is None:
-                    print("failed to convert frame to image")
                     continue
-                
-                frame = cv2.imencode('.jpg', color_image)[1].tobytes()
-                
-                yield (b'--frame\r\n'
-                    b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-                
-            except KeyboardInterrupt:
+                jpg_bytes = cv2.imencode('.jpg', color_image)[1].tobytes()
+                with latest_frame_lock:
+                    latest_frame["data"] = jpg_bytes
+            except Exception:
                 pass
-        
+
+    threading.Thread(target=capture_loop, daemon=True).start()
+
+    def generate_frames():
+        while True:
+            with latest_frame_lock:
+                frame = latest_frame["data"]
+            if frame is None:
+                time.sleep(0.01)
+                continue
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n'
+                   b'Content-Length: ' + str(len(frame)).encode() + b'\r\n\r\n'
+                   + frame + b'\r\n')
+            time.sleep(0.03)
+
     @app.route('/rgb_stream')
     def rgb_stream():
         return Response(generate_frames(),
                         mimetype='multipart/x-mixed-replace; boundary=frame')
-    
+
     app.run(host=host, port=port, threaded=True, use_reloader=False)
     pipeline.stop()
 

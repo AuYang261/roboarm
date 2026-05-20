@@ -13,6 +13,7 @@ class_names = list(
         open(
             os.path.join(os.path.dirname(os.path.dirname(__file__)), "data.yaml"),
             "r",
+            encoding="utf-8",
         )
     )["names"].values()
 )
