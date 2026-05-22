@@ -108,7 +108,7 @@ def main():
                             target_x + offset * np.cos(gripper_angle_rad),
                             target_y + offset * np.sin(-gripper_angle_rad),
                             gripper_angle_rad,
-                            class_place_pos.get("pos"),
+                            class_place_pos["pos"],
                         )
                 draw_box(frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f}")
 
