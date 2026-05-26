@@ -27,7 +27,7 @@ _HEADLESS_MOUSE_CALLBACKS: dict[str, tuple[Callable[..., Any], Any]] = {}
 
 
 def show_img_by_web() -> bool:
-    return _HEADLESS_SERVER_PORT is not None
+    return not _HEADLESS_SERVER_PORT
 
 
 def _frame_event(window_name: str) -> threading.Event:
