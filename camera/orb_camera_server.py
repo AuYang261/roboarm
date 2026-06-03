@@ -678,7 +678,7 @@ def main():
     )
     parser.add_argument("--idx", type=int, default=4, help="camera index")
     parser.add_argument(
-        "--mode", type=str, default="multi", help="Video source (default: multi)"
+        "--mode", type=str, default="rgb", help="Video source (default: rgb)"
     )
     args = parser.parse_args()
     if args.mode == "none":

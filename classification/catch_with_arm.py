@@ -51,7 +51,6 @@ def main():
             if frame is None:
                 continue
 
-            frame_w, frame_h = frame.shape[:2]
             if future is None or future.done():
                 detections = []
                 for model in models:

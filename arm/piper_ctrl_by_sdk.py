@@ -54,7 +54,7 @@ class PiperBySDK(Arm):
         self.debug_mode = debug_mode
         self.move_mode_end_pose = move_mode_end_pose
         self.timeout = 10 if debug_mode else 5
-        self.steps = 100
+        self.steps = 50
 
         # 加载 URDF 构建运动学链
         urdf_path = (
