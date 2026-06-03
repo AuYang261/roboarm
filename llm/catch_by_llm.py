@@ -56,7 +56,7 @@ def record_catch_result(instruction: str, target_name: str, success: bool):
     )
 
 
-arm = Arm()
+arm = None  # 延迟初始化，由 main / 外部调用者注入
 box_queue = Queue()
 frame = None
 
@@ -104,7 +104,8 @@ def consumption_thread():
 
 
 def catch_by_audio():
-    global frame, box_queue
+    global frame, box_queue, arm
+    arm = Arm()
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     audio_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     future = None
@@ -152,10 +153,15 @@ def catch_by_instruction(
     instruction: str,
     queue_output: Queue,
     success_callback: Optional[Callable[[], None]] = None,
+    arm=None,
 ):
-    """根据和画面指令阻塞获取检测结果，执行抓取动作，并将检测结果放入队列中"""
+    """根据和画面指令阻塞获取检测结果，执行抓取动作，并将检测结果放入队列中。
+    arm 参数可选：外部传入则使用传入实例，否则使用模块级全局 arm。"""
+    box = None
+    catch_success = None
     try:
-        global arm
+        if arm is None:
+            arm = globals().get("arm")
         llm_detect = LLMDetect()
         print("Instruction:", instruction)
         place_pos = get_config_value("place_pos")
@@ -228,10 +234,25 @@ def catch_by_instruction(
             print(f"No response({response_task}) or frame({frame}) available.")
     except Exception as e:
         print("Exception: ", e)
+    if box is None:
+        return {
+            "status": "failed",
+            "reason": "未检测到目标物体",
+            "instruction": instruction,
+            "method": "llm",
+        }
+    return {
+        "status": "success" if catch_success else "failed",
+        "target": box.class_name,
+        "instruction": instruction,
+        "method": "llm",
+        "grasp_success": catch_success,
+    }
 
 
 def catch_by_text_instruction():
-    global frame, box_queue
+    global frame, box_queue, arm
+    arm = Arm()
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     instructions = [
         "抓取最近的积木",
