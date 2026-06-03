@@ -1,0 +1,22 @@
+manifestVersion: 1
+name: roboarm_deploy
+
+env:
+  LOG: "INFO"
+
+system:
+  atlas:
+    listen: 127.0.0.1:50051
+  executor:
+    listen: 127.0.0.1:50061
+  pilot:
+    listen: 127.0.0.1:50071
+    vlm:
+      upstream: ${VLM_BASE_URL}
+      api_key: ${VLM_API_KEY}
+      model: ${VLM_MODEL}
+      api_format: openai
+
+skill:
+  - name: roboarm_grasp
+    path: ../roboarm_skill

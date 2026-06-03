@@ -1,0 +1,16 @@
+manifestVersion: 1
+
+build: bash scripts/build.sh
+
+start: bash scripts/start.sh
+
+package:
+  name: roboarm_grasp
+  version: 0.1.0
+  vendor: robonix
+  description: YOLO + LLM detection + robotic arm grasping skill
+  license: MulanPSL-2.0
+
+capabilities: []
+
+depends: []

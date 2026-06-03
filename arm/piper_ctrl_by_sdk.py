@@ -54,6 +54,7 @@ class PiperBySDK(Arm):
         self.debug_mode = debug_mode
         self.move_mode_end_pose = move_mode_end_pose
         self.timeout = 10 if debug_mode else 5
+        self.steps = 50
 
         # 加载 URDF 构建运动学链
         urdf_path = (
@@ -103,6 +104,11 @@ class PiperBySDK(Arm):
 
     # ========== 高层接口实现 ==========
 
+    def get_raw_joint_angles(
+        self, retry_times=None
+    ) -> tuple[Union[List[float], None], Union[float, None]]:
+        return self.get_arm_angles(retry_times=retry_times)
+
     # TODO: 如果直接移动太快，参考 LeroboArm 做线性插值
     def set_arm_angles(
         self,
@@ -131,16 +137,47 @@ class PiperBySDK(Arm):
                 self.set_move_mode(move_mode_end_pose=False)
                 self.move_mode_end_pose = False
 
-            ctrl = np.array(angles_deg) * self.FACTOR
-            self.piper.JointCtrl(
-                joint_1=int(ctrl[0]),
-                joint_2=int(ctrl[1]),
-                joint_3=int(ctrl[2]),
-                joint_4=int(ctrl[3]),
-                joint_5=int(ctrl[4]),
-                joint_6=int(ctrl[5]),
-            )
             start = time.time()
+            current_angles_deg, current_gripper_0to1 = self.get_arm_angles()
+            if current_angles_deg is None or current_gripper_0to1 is None:
+                return False
+            desired_joint_angles = list(angles_deg)
+            for step_index, alpha in enumerate(np.linspace(0, 1, self.steps + 1)[1:]):
+                interp_joint_angles = []
+                for current_angle, desired_angle in zip(
+                    current_angles_deg, desired_joint_angles, strict=True
+                ):
+                    interp_joint_angles.append(
+                        current_angle * (1 - alpha) + desired_angle * alpha
+                    )
+
+                ctrl = np.array(interp_joint_angles) * self.FACTOR
+                self.piper.JointCtrl(
+                    joint_1=int(ctrl[0]),
+                    joint_2=int(ctrl[1]),
+                    joint_3=int(ctrl[2]),
+                    joint_4=int(ctrl[3]),
+                    joint_5=int(ctrl[4]),
+                    joint_6=int(ctrl[5]),
+                )
+
+                if step_callback is not None:
+                    step_callback(
+                        {
+                            "target_joint_angles_deg": (
+                                [float(angle) for angle in angles_deg]
+                            ),
+                            "target_gripper_open_0to1": (
+                                None
+                                if gripper_open_0to1 is None
+                                else float(gripper_open_0to1)
+                            ),
+                            "final_target_joint_angles_deg": list(desired_joint_angles),
+                            "step_index": int(step_index),
+                            "steps": int(self.steps),
+                            "alpha": float(alpha),
+                        }
+                    )
             while True:
                 # 这里获取有问题，有时候没到目标status.motion_status就为0了
                 # 所以感觉没啥用，还是得靠sleep固定时长等待到达
@@ -159,22 +196,12 @@ class PiperBySDK(Arm):
                 self.set_move_mode(move_mode_end_pose=True)
                 self.move_mode_end_pose = True
 
-        if step_callback is not None:
-            step_callback(
-                {
-                    "target_joint_angles_deg": (
-                        None
-                        if angles_deg is None
-                        else [float(angle) for angle in angles_deg]
-                    ),
-                    "target_gripper_open_0to1": (
-                        None if gripper_open_0to1 is None else float(gripper_open_0to1)
-                    ),
-                    "step_index": 0,
-                    "steps": 1,
-                    "alpha": 1.0,
-                }
-            )
+        if angles_deg is not None:
+            try:
+                self.wait_until_reached(angles_deg)
+            except TimeoutError as e:
+                print(f"仿真机械臂未在超时内到达目标位姿: {e}")
+                return False
         return True
 
     def get_arm_angles(

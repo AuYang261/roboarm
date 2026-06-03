@@ -56,7 +56,7 @@ def record_catch_result(instruction: str, target_name: str, success: bool):
     )
 
 
-arm = Arm()
+arm = None  # 延迟初始化，由 main / 外部调用者注入
 box_queue = Queue()
 frame = None
 
@@ -104,7 +104,8 @@ def consumption_thread():
 
 
 def catch_by_audio():
-    global frame, box_queue
+    global frame, box_queue, arm
+    arm = Arm()
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     audio_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     future = None
@@ -152,13 +153,18 @@ def catch_by_instruction(
     instruction: str,
     queue_output: Queue,
     success_callback: Optional[Callable[[], None]] = None,
+    arm=None,
 ):
-    """根据和画面指令阻塞获取检测结果，执行抓取动作，并将检测结果放入队列中"""
+    """根据和画面指令阻塞获取检测结果，执行抓取动作，并将检测结果放入队列中。
+    arm 参数可选：外部传入则使用传入实例，否则使用模块级全局 arm。"""
+    box = None
+    catch_success = None
     try:
-        global arm
+        if arm is None:
+            arm = globals().get("arm")
         llm_detect = LLMDetect()
         print("Instruction:", instruction)
-        class_pos = get_config_value("class_pos")
+        place_pos = get_config_value("place_pos")
         offset = get_config_value("catch_offset")
         default_gripper_aside_pos = get_config_value(
             "default_gripper_aside_pos", raise_if_missing=False
@@ -201,15 +207,13 @@ def catch_by_instruction(
                             box.box_rotation_deg,
                         )
                         found = False
-                        place_pos = [0.1, 0.0]
-                        class_name = ""
-                        for name, pos in class_pos.items():
+                        class_place_pos = [0.1, 0.0]
+                        for name, pos in place_pos.items():
                             for keyword in pos.get("keywords", []):
                                 if keyword in box.class_name.lower():
                                     print(f"放置到'{name}'区域")
-                                    place_pos = pos.get("pos", place_pos)
+                                    class_place_pos = pos.get("pos", class_place_pos)
                                     found = True
-                                    class_name = name
                                     break
                             if found:
                                 break
@@ -219,7 +223,7 @@ def catch_by_instruction(
                             target_x + offset * np.cos(gripper_angle_rad),
                             target_y + offset * np.sin(-gripper_angle_rad),
                             gripper_angle_rad,
-                            place_pos,
+                            class_place_pos,
                         )
                         record_catch_result(instruction, box.class_name, catch_success)
                         if catch_success and success_callback:
@@ -230,10 +234,25 @@ def catch_by_instruction(
             print(f"No response({response_task}) or frame({frame}) available.")
     except Exception as e:
         print("Exception: ", e)
+    if box is None:
+        return {
+            "status": "failed",
+            "reason": "未检测到目标物体",
+            "instruction": instruction,
+            "method": "llm",
+        }
+    return {
+        "status": "success" if catch_success else "failed",
+        "target": box.class_name,
+        "instruction": instruction,
+        "method": "llm",
+        "grasp_success": catch_success,
+    }
 
 
 def catch_by_text_instruction():
-    global frame, box_queue
+    global frame, box_queue, arm
+    arm = Arm()
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     instructions = [
         "抓取最近的积木",
