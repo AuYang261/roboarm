@@ -1,0 +1,276 @@
+diff --git a/Being-H05/BeingH/dataset/datasets/vla_dataset.py b/Being-H05/BeingH/dataset/datasets/vla_dataset.py
+index 2cb0626..ac6c3bf 100644
+--- a/Being-H05/BeingH/dataset/datasets/vla_dataset.py
++++ b/Being-H05/BeingH/dataset/datasets/vla_dataset.py
+@@ -137,7 +137,7 @@ class LeRobotIterableDataset(torch.utils.data.IterableDataset):
+         data_config_names,
+         dataset_path_list: List[str],
+         embodiment_tags: List[str],
+-        vit_transform_args,
++        vit_transform_args=None,
+         num_used_episodes_per_dataset: List[int] = None,
+         num_used_episodes_per_task: List[int] = None,
+         num_used_frames_per_dataset: List[int] = None,
+@@ -195,7 +195,7 @@ class LeRobotIterableDataset(torch.utils.data.IterableDataset):
+         self.vit_dropout_prob = vit_dropout_prob
+         self.state_dropout_prob = state_dropout_prob
+     
+-        _, self.vit_transform = build_vit_transform_base(is_train=self.is_train, force_image_size=force_image_size, **vit_transform_args)
++        _, self.vit_transform = build_vit_transform_base(is_train=self.is_train, force_image_size=force_image_size, **(vit_transform_args or {}))
+         # TOKENIZER AND TEXT
+         self.tokenizer = tokenizer
+         self.template_name = template_name
+diff --git a/Being-H05/BeingH/model/layers.py b/Being-H05/BeingH/model/layers.py
+index 6704284..8e00546 100644
+--- a/Being-H05/BeingH/model/layers.py
++++ b/Being-H05/BeingH/model/layers.py
+@@ -167,7 +167,7 @@ class InternVLConnector(nn.Module):
+         else:
+             logger.info("Initializing connector from MLLM weights")
+             for name, param in self.named_parameters():
+-                param.data.copy_(state_dict.pop(name).data)
++                param.data.copy_(state_dict.pop("connector." + name).data)
+ 
+         return state_dict
+     
+diff --git a/Being-H05/BeingH/model/vit_model/internvit/modeling_intern_vit.py b/Being-H05/BeingH/model/vit_model/internvit/modeling_intern_vit.py
+index cc64458..95c97c6 100644
+--- a/Being-H05/BeingH/model/vit_model/internvit/modeling_intern_vit.py
++++ b/Being-H05/BeingH/model/vit_model/internvit/modeling_intern_vit.py
+@@ -373,7 +373,7 @@ class InternVisionModel(PreTrainedModel):
+         """initialize the llm"""
+         print("Initializing vision model from MLLM weights")
+         for name, param in self.named_parameters():
+-            original_name = "vision_model."+name
++            original_name = "vit_model."+name
+             try:
+                 param.data.copy_(mllm_state_dict.pop(original_name).data)
+             except:
+@@ -384,7 +384,7 @@ class InternVisionModel(PreTrainedModel):
+         """initialize the llm"""
+         print("Initializing vision model from MLLM weights")
+         for name, param in self.named_parameters():
+-            original_name = "vision_model."+name
++            original_name = "vit_model."+name
+             try:
+                 param.data.copy_(mllm_state_dict.pop(original_name).data)
+             except:
+diff --git a/Being-H05/BeingH/model/vit_model/internvit_navit.py b/Being-H05/BeingH/model/vit_model/internvit_navit.py
+index 735125e..8d8df28 100644
+--- a/Being-H05/BeingH/model/vit_model/internvit_navit.py
++++ b/Being-H05/BeingH/model/vit_model/internvit_navit.py
+@@ -379,7 +379,7 @@ class InternVisionModel(PreTrainedModel):
+         """initialize the llm"""
+         logger.info("Initializing vision model from MLLM weights")
+         for name, param in self.named_parameters():
+-            original_name = "vision_model."+name
++            original_name = "vit_model."+name
+             try:
+                 param.data.copy_(mllm_state_dict.pop(original_name).data)
+             except:
+diff --git a/Being-H05/BeingH/train/train.py b/Being-H05/BeingH/train/train.py
+index b47d392..543f604 100644
+--- a/Being-H05/BeingH/train/train.py
++++ b/Being-H05/BeingH/train/train.py
+@@ -453,8 +453,14 @@ def apply_model_freezing(
+ 
+     # Freeze multimodal LLM (keep only expert/action parameters active)
+     if training_args.freeze_mllm:
++        # Expert-related parameter name patterns that should NOT be frozen
++        EXPERT_PATTERNS = ("mot_gen", "action_encoder", "action_decoder",
++                          "proprio_encoder", "mpg", "action_to_vlm", "vlm_to_action")
+         for name, param in model.named_parameters():
+             if name in mllm_layer_names:
++                # Skip expert/action parameters — they must remain trainable
++                if any(p in name for p in EXPERT_PATTERNS):
++                    continue
+                 param.requires_grad = False
+             if "connector" in name and training_args.freeze_vit_mlp:
+                 param.requires_grad = False
+@@ -948,7 +954,17 @@ def main():
+     model.vit_model.gradient_checkpointing = True
+     model.vit_model.encoder.gradient_checkpointing = True
+     if model_args.grad_checkpoint:
+-        model.language_model._set_gradient_checkpointing()
++        from torch.utils.checkpoint import checkpoint
++        # Apply gradient checkpointing on the inner Qwen3Model (not the wrapper)
++        # _set_gradient_checkpointing fails on Qwen3ForCausalLM because it
++        # doesn't have the gradient_checkpointing attribute on the wrapper itself
++        inner_model = model.language_model.model
++        inner_model._gradient_checkpointing_func = checkpoint
++        inner_model.gradient_checkpointing = True
++        for layer in inner_model.layers:
++            layer._gradient_checkpointing_func = checkpoint
++            layer.gradient_checkpointing = True
++        logger.info("Gradient checkpointing enabled on LLM decoder layers")
+     for name, param in model.named_parameters():
+         if torch.isnan(param.data).any():
+             breakpoint()
+diff --git a/Being-H05/BeingH/train/train_utils.py b/Being-H05/BeingH/train/train_utils.py
+index 0a04b8b..ade21c5 100644
+--- a/Being-H05/BeingH/train/train_utils.py
++++ b/Being-H05/BeingH/train/train_utils.py
+@@ -171,7 +171,7 @@ def loading_ckpt_from_pretrained(model_args, logger: logging.Logger):
+             k.replace("vision_model", "vit_model") for k in mllm_state_dict.keys()
+         ]
+         llm_config = mllm_config.llm_config
+-        vision_config = mllm_config.vision_config
++        vision_config = mllm_config.vit_config
+     else:
+         logger.info(f"Initializing LLM from: {model_args.llm_path}")
+         llm_config = Qwen2Config.from_pretrained(model_args.llm_path)
+@@ -224,7 +224,12 @@ def loading_ckpt_from_pretrained(model_args, logger: logging.Logger):
+         
+         mllm_state_dict = connector.init_weights(mllm_state_dict, logger)
+ 
+-        assert len(mllm_state_dict) == 0, "All weights should be consumed!"
++        # NOTE: Remaining weights (action expert, MPG, projections etc.)
++        # will be loaded later via resume_from checkpoint loading
++        if len(mllm_state_dict) > 0:
++            remaining_prefixes = set(k.split('.')[0] for k in mllm_state_dict.keys())
++            logger.info(f"{len(mllm_state_dict)} weights not consumed (will be loaded via resume_from). "
++                       f"Prefixes: {remaining_prefixes}")
+     else:
+         # Load from separate LLM and ViT,
+         # We abandan it for now, bug may exist
+diff --git a/Being-H05/BeingH/utils/constants.py b/Being-H05/BeingH/utils/constants.py
+index 96627ac..2a0ba47 100644
+--- a/Being-H05/BeingH/utils/constants.py
++++ b/Being-H05/BeingH/utils/constants.py
+@@ -131,10 +131,11 @@ MULTI_DB_INSTRUCT_TEMPLATE = (
+ # ==============================================================================
+ 
+ class EmbodimentTag(Enum):
+-    """Enumeration of supported robot embodiments."""    
++    """Enumeration of supported robot embodiments."""
+     LIBERO_FRANKA = "libero_franka_gripper"
+     LIBERO = "libero"
+     ROBOCASA = "robocasa"
++    KOCH = "koch"
+ 
+     NEW_EMBODIMENT = "new_embodiment"
+ 
+@@ -144,7 +145,7 @@ EMBODIMENT_TAG_MAPPING = {
+     EmbodimentTag.LIBERO_FRANKA.value: 0,
+     EmbodimentTag.LIBERO.value: 0,  # Same as LIBERO_FRANKA
+     EmbodimentTag.ROBOCASA.value: 31,
+-    
++    EmbodimentTag.KOCH.value: 0,   # Same projector index as LIBERO
+     EmbodimentTag.NEW_EMBODIMENT.value: 31,
+ 
+ }
+diff --git a/Being-H05/configs/data_config.py b/Being-H05/configs/data_config.py
+index 105611e..4b11c7d 100644
+--- a/Being-H05/configs/data_config.py
++++ b/Being-H05/configs/data_config.py
+@@ -279,7 +279,70 @@ class RobocasaHumanDataConfig(BaseDataConfig):
+         return ComposedModalityTransform(transforms=transforms)
+ 
+ 
++class KochFollowerDataConfig(BaseDataConfig):
++    """DataConfig for Koch follower arm (5 arm joints + 1 gripper, joint-space control)."""
++    VIDEO_KEYS = ['video.above', 'video.wrist']
++    VIDEO_SOURCE_COLUMNS = {
++        'video.above': 'observation.images.above',
++        'video.wrist': 'observation.images.wrist',
++    }
++    STATE_KEYS = ['state.arm_joint_position', 'state.gripper_position']
++    ACTION_KEYS = ['action.arm_joint_position', 'action.gripper_position']
++
++    UNIFIED_MAPPING: Dict[str, Tuple[int, int]] = {
++        'state.arm_joint_position': (50, 55),
++        'state.gripper_position': (18, 19),
++        'action.arm_joint_position': (50, 55),
++        'action.gripper_position': (18, 19),
++    }
++
++    state_normalization_modes = {
++        'state.arm_joint_position': 'min_max',
++        'state.gripper_position': 'min_max',
++    }
++
++    action_normalization_modes = {
++        'action.arm_joint_position': 'min_max',
++        'action.gripper_position': 'min_max',
++    }
++
++    def get_feature_meta(self):
++        return {
++            'state.arm_joint_position': ("5-d absolute arm joint position (shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll)", 5),
++            'state.gripper_position': ("1-d gripper position", 1),
++            'action.arm_joint_position': ("5-d absolute arm joint position", 5),
++            'action.gripper_position': ("1-d gripper position", 1),
++        }
++
++    def define_modalities(self) -> Dict[str, ModalityDef]:
++        modalities = {
++            'language.instruction': ModalityDef(source_column='task_index', start=0, end=0),
++            'state.arm_joint_position': ModalityDef(source_column='observation.state', start=0, end=5),
++            'state.gripper_position': ModalityDef(source_column='observation.state', start=5, end=6),
++            'action.arm_joint_position': ModalityDef(source_column='action', start=0, end=5),
++            'action.gripper_position': ModalityDef(source_column='action', start=5, end=6),
++        }
++        modalities = self.add_video_modality(modalities)
++        return modalities
++
++    def get_transforms(self) -> ModalityTransform:
++        transforms = [
++            StateActionToTensor(apply_to=self.STATE_KEYS),
++            StateActionTransform(
++                apply_to=self.STATE_KEYS,
++                normalization_modes=self.state_normalization_modes,
++            ),
++            StateActionToTensor(apply_to=self.ACTION_KEYS),
++            StateActionTransform(
++                apply_to=self.ACTION_KEYS,
++                normalization_modes=self.action_normalization_modes,
++            ),
++        ]
++        return ComposedModalityTransform(transforms=transforms)
++
++
+ DATA_CONFIG_MAP = {
+     "libero_nonorm": LiberoNoNormDataConfig,
+     "robocasa_human": RobocasaHumanDataConfig,
++    "koch_follower": KochFollowerDataConfig,
+ }
+diff --git a/Being-H05/configs/dataset_info.py b/Being-H05/configs/dataset_info.py
+index 3421a84..f1c97bf 100644
+--- a/Being-H05/configs/dataset_info.py
++++ b/Being-H05/configs/dataset_info.py
+@@ -7,6 +7,7 @@ DATASET_REGISTRY = {
+     'libero_posttrain': LeRobotIterableDataset,
+     'robocasa_human_posttrain': LeRobotIterableDataset,
+     'uni_posttrain': LeRobotIterableDataset,
++    'koch_posttrain': LeRobotIterableDataset,
+ }
+ 
+ 
+@@ -276,5 +277,25 @@ DATASET_INFO = {
+             'embodiment_tag': 'robocasa',
+             'subtask': 'single_panda_gripper.TurnSinkSpout',
+         },
+-    },  
++    },
++
++    'koch_posttrain': {
++        'pick_orange_simple_shape':       {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_orange_simple_shape"},
++        'pick_orange_multi_obj':          {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_orange_multi_obj"},
++        'pick_orange_multi_obj_wyh':      {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_orange_multi_obj_wyh"},
++        'pick_orange_multi_obj_wyh_negative': {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_orange_multi_obj_wyh_negative"},
++        'pick_red_multi_obj':             {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_red_multi_obj"},
++        'pick_red_multi_obj_20260507':    {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_red_multi_obj_20260507"},
++        'pick_red_multi_obj_negative':    {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_red_multi_obj_negative"},
++        'pick_red_multi_obj_wyh':         {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_red_multi_obj_wyh"},
++        'pick_green_multi_obj':           {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_green_multi_obj"},
++        'pick_green_multi_obj_20260507':  {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_green_multi_obj_20260507"},
++        'pick_green_multi_obj_negative':  {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_green_multi_obj_negative"},
++        'pick_green_multi_obj_wyh':       {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_green_multi_obj_wyh"},
++        'pick_white_multi_obj':           {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_white_multi_obj"},
++        'pick_white_multi_obj_20260507':  {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_white_multi_obj_20260507"},
++        'pick_white_multi_obj_wyh':       {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_white_multi_obj_wyh"},
++        'pick_white_multi_obj_wyh_negative': {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/pick_white_multi_obj_wyh_negative"},
++        'multi_task_train':              {'dataset_path': "/home/hyl/Being-H/origin_data_v21/koch_follower/multi_task_train"},
++    },
+ }
+\ No newline at end of file
