@@ -66,14 +66,19 @@
     │
     └──────────────┬────────────────┘
                    ▼
-            LLM (Qwen3-0.6B)   ← 冻结（含 MoE _mot_gen 层） - und-loss
+            LLM (Qwen3-0.6B)   ← 冻结（含 MoE _mot_gen 层）
+                   │
+                   ├──► LM head ──► und_loss (CE, 文本理解)  ← 冻结，全程=0
                    │
                    ▼
             Action Expert (Flow Matching)  ← **仅训练此部分**
             + Action Encoder/Decoder
             + MPG (关闭)
             + RTC (关闭)
+            ──► action_loss (Flow Matching)
 ```
+
+> **关于 und_loss=0**：日志中 `und_loss: 0.0000` / `num_und: 0` 是正常的。U-ND（Understanding）是文本 token 的交叉熵损失，当前微调方案冻结了 MLLM 且数据集中文本项无 loss 标记，因此 U-ND 模块不产生梯度。详见 [§9.13](#913-und_loss-全程为-0u-nd-模块未启用)。
 
 ---
 
@@ -326,6 +331,50 @@ Total skipped due to size mismatch: 270 keys
 **问题**：`TypeError: unsupported operand type(s) for +: 'int' and 'list'`（`base_dataset.py:201`）
 
 **根因**：YAML 中的 `weight` 是数据集组级别的采样权重，必须为标量。多子数据集场景下（如 `all_data.yaml` 有 17 个子数据集），子数据集间的权重由 `LeRobotIterableDataset` 内部根据 `total_frames` 自动计算，不需在 YAML 中逐项指定。参考 `libero_robocasa.yaml`（28 个子数据集），其 `weight: 1` 也是标量。
+
+### 9.13 und_loss 全程为 0（U-ND 模块未启用）
+
+训练日志中 `und_loss: 0.0000` 和 `num_und: 0` 是**正确的、期望的行为**，不是 bug。
+
+**UND 是什么？**
+
+U-ND = **Understanding**（理解），对应模型两种损失之一的 Cross-Entropy loss on **text tokens**：
+
+```
+               ┌─ Text tokens ──→  LM head ──→ CE loss ──→ und_loss
+               │                (预测下一个文本token)
+ViT+Text+State ──→ LLM ──→
+               │
+               └─ Action tokens ──→ Action Expert ──→ Flow Matching loss ──→ action_loss
+                                    (预测机器人动作)
+```
+
+- **UND loss**：衡量模型"理解"能力——给定指令 + 图像 + 状态，能否正确预测回答文本
+- **Action loss**：衡量模型"执行"能力——预测机器人动作轨迹
+
+**为什么 und_loss = 0？**
+
+链条经过三个层面：
+
+| 层面 | 逻辑 | 结果 |
+|------|------|------|
+| 数据集 (`vla_dataset.py`) | 所有 text 项的 `has_loss=0`，只有 action 项的 `has_loss=1`（但 action 不是 text 类型） | 没有文本 token 被标记为 loss target |
+| 数据打包 (`base_dataset.py`) | 仅对 `type='text'` + `has_loss=1` 的项生成 `ce_loss_indexes` 和 `packed_label_ids` | `ce_loss_indexes` 为空，`num_und_samples=0` |
+| 模型前向 (`beingvla.py`) | `if ce_loss_indexes is not None` → 永远 `None` → 跳过 CE loss 计算 | `und_loss = torch.tensor(0.0)` |
+
+本质原因：你的微调配置是 `freeze_mllm=True`，**只训练 Action Expert**。MLLM 主干（LLM+ViT+Connector）已冻结，其语言理解/生成能力不需要学习，只需要学会映射到 koch 机器人的动作空间。
+
+**如果启用 UND loss 会怎样？**
+
+需要同时做以下修改：
+1. `freeze_mllm=False` —— 解冻整个 LLM
+2. 在数据集 sequence plan 中将文本项（如 instruction 或 assistant 回答）的 `has_loss` 改为 `1`
+
+**效果**：
+- 模型同时学"说对的话"和"做对的动作"
+- **显存暴增**：当前已用 ~26.8 GB（`max_mem: 26836MB`），解冻 LLM 需要额外存储 28 层 transformer 的梯度、optimizer state、activations → **RTX 5090 32GB 必然 OOM**
+- **需要更多数据**：CE loss on text 容易过拟合，koch 数据集以动作数据为主，文本多样性不足以支撑 LLM 微调而不遗忘预训练知识
+- 属于**全参数微调**场景，单卡 5090 无法完成，需要多卡或更大显存 GPU
 
 ---
 
