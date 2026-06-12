@@ -367,8 +367,9 @@ def get_audio_text(
     """从麦克风获取一段音频并转写为文本
 
     参数:
-        backend: "whisper" 使用自部署 whisper 服务，其他值使用讯飞
+        backend: "xunfei" 使用讯飞，其他值使用自部署语音转文字服务
     """
+
     mic = MicPCMStream(sample_rate=16000, channels=1, block_frames=640)
     input("按回车键开始录音...\n")
     mic.start()

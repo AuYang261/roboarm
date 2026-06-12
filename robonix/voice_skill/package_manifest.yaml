@@ -1,0 +1,16 @@
+manifestVersion: 1
+
+build: bash scripts/build.sh
+
+start: bash scripts/start.sh
+
+package:
+  name: roboarm_voice
+  version: 0.1.0
+  vendor: robonix
+  description: Voice recording + speech-to-text via whisper, enabling voice-controlled robotic arm grasping
+  license: MulanPSL-2.0
+
+capabilities: []
+
+depends: []

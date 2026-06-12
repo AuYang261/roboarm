@@ -18,7 +18,9 @@ import time
 import traceback
 
 # -- Add roboarm project to Python path --
-_ROBOARM_PATH = os.environ.get("ROBOARM_PATH", "/home/xjy/roboarm")
+_ROBOARM_PATH = os.environ.get("ROBOARM_PATH")
+if not _ROBOARM_PATH:
+    raise ValueError("Set ROBOARM_PATH as root of roboarm project")
 if _ROBOARM_PATH not in sys.path:
     sys.path.insert(0, _ROBOARM_PATH)
 
