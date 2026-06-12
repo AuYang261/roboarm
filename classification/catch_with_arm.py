@@ -18,28 +18,22 @@ import copy
 from utils.cv2_display import show_image, poll_key, destroy_all_windows
 
 
-def classify_and_grasp_objects(arm, frame, models, conf_thres: float) -> list[dict]:
-    """对一帧图像运行 YOLO 检测，逐个抓取识别到的物体。
+def _grasp_detections(arm, detections: list) -> list:
+    """对检测结果执行抓取，返回附带 grasp_success 的结果列表。
 
     Args:
         arm: Arm() 实例。
-        frame: BGR 图像 (numpy array)。
-        models: YOLO 模型列表。
-        conf_thres: 置信度阈值。
+        detections: [(u,v,w,h,r), score, class_id, class_name] 列表。
 
     Returns:
         [(u, v, w, h, r), score, class_id, class_name, grasp_success]
-        每个检测结果附加 grasp_success 字段。
     """
+
     place_pos = get_config_value("place_pos", default={}, raise_if_missing=False)
     place_distance_threshold = get_config_value(
         "place_distance_threshold", default=0, raise_if_missing=False
     )
     offset = get_config_value("catch_offset")
-
-    detections = []
-    for model in models:
-        detections.extend(detect_objects_in_frame(model, frame, conf_thres=conf_thres))
 
     results = []
     for (u, v, w, h, r), score, class_id, class_name in detections:
@@ -69,6 +63,7 @@ def classify_and_grasp_objects(arm, frame, models, conf_thres: float) -> list[di
             )
             < place_distance_threshold
         ):
+            print("Too close from place pos, skipped")
             grasp_success = None  # skipped
         else:
             grasp_success = arm.catch_and_place(
@@ -81,6 +76,26 @@ def classify_and_grasp_objects(arm, frame, models, conf_thres: float) -> list[di
         results.append(((u, v, w, h, r), score, class_id, class_name, grasp_success))
 
     return results
+
+
+def classify_and_grasp_objects(arm, frame, models, conf_thres: float) -> list[dict]:
+    """对一帧图像运行 YOLO 检测，逐个抓取识别到的物体。
+
+    Args:
+        arm: Arm() 实例。
+        frame: BGR 图像 (numpy array)。
+        models: YOLO 模型列表。
+        conf_thres: 置信度阈值。
+
+    Returns:
+        [(u, v, w, h, r), score, class_id, class_name, grasp_success]
+        每个检测结果附加 grasp_success 字段。
+    """
+    detections = []
+    for model in models:
+        detections.extend(detect_objects_in_frame(model, frame, conf_thres=conf_thres))
+
+    return _grasp_detections(arm, detections)
 
 
 def main():
@@ -98,12 +113,18 @@ def main():
     cam = Camera(color=True, depth=False)
     models = [load_model(model_path) for model_path in model_paths]
 
-    latest_results: list = []
+    # Global variables shared between threads
+    results: list = []  # [(u,v,w,h,r), score, class_id, class_name, grasp_success]
+    detections: list = []  # raw detections for immediate display
     results_lock = threading.Lock()
+    detections_lock = threading.Lock()
     cam_lock = threading.Lock()
     stop_event = threading.Event()
+    new_detection_event = threading.Event()
 
     def detection_loop():
+        """只做检测，不等待抓取结果。"""
+
         while not stop_event.is_set():
             with cam_lock:
                 frames = cam.get_frames()
@@ -113,16 +134,39 @@ def main():
             if frame is None:
                 continue
 
-            results = classify_and_grasp_objects(arm, frame, models, default_conf_thres)
+            new_detections = []
+            for model in models:
+                new_detections.extend(
+                    detect_objects_in_frame(model, frame, conf_thres=default_conf_thres)
+                )
+
+            with detections_lock:
+                detections[:] = new_detections
+            new_detection_event.set()
+
+    def grasp_loop():
+        """根据最新检测结果执行抓取。"""
+        while not stop_event.is_set():
+            if default_gripper_aside_pos:
+                arm.move_to(default_gripper_aside_pos, 1, block_until_reach=True)
+            new_detection_event.wait(timeout=0.5)
+            new_detection_event.clear()
+
+            with detections_lock:
+                current_detections = list(detections)
+
+            if not current_detections:
+                continue
+
+            new_results = _grasp_detections(arm, current_detections)
 
             with results_lock:
-                latest_results[:] = results
-
-            if default_gripper_aside_pos:
-                arm.move_to(default_gripper_aside_pos, 1)
+                results[:] = new_results
 
     detection_thread = threading.Thread(target=detection_loop, daemon=True)
     detection_thread.start()
+    grasp_thread = threading.Thread(target=grasp_loop, daemon=True)
+    grasp_thread.start()
 
     try:
         while not stop_event.is_set():
@@ -134,20 +178,39 @@ def main():
             if frame is None:
                 continue
 
-            with results_lock:
-                results_copy = list(latest_results)
+            # 直接用 detections 显示（不等待抓取结果）
+            with detections_lock:
+                current_detections = list(detections)
 
-            for (u, v, w, h, r), score, _, class_name, grasp_success in results_copy:
+            with results_lock:
+                current_results = list(results)
+
+            # 建立 detection -> grasp_success 的映射
+            grasp_status = {}
+            for (
+                (u, v, w, h, r),
+                score,
+                class_id,
+                class_name,
+                grasp_success,
+            ) in current_results:
+                grasp_status[(u, v, w, h, r, class_name)] = grasp_success
+
+            for (u, v, w, h, r), score, class_id, class_name in current_detections:
                 angle_deg = np.rad2deg(r)
-                if grasp_success is None:
-                    status = "SKIP"
-                elif grasp_success:
+                gs = grasp_status.get((u, v, w, h, r, class_name))
+                if gs is True:
                     status = "OK"
-                else:
+                elif gs is False:
                     status = "FAIL"
-                draw_box(
-                    frame, u, v, w, h, angle_deg, f"{class_name}: {score:.2f} {status}"
-                )
+                elif gs is None:
+                    status = "SKIP"
+                else:
+                    status = ""  # 尚未抓取
+                label = f"{class_name}: {score:.2f}"
+                if status:
+                    label += f" {status}"
+                draw_box(frame, u, v, w, h, angle_deg, label)
 
             show_image("Detections", frame)
             if poll_key(1) & 0xFF == 27:
@@ -158,6 +221,7 @@ def main():
         stop_event.set()
 
     detection_thread.join(timeout=2)
+    grasp_thread.join(timeout=2)
     arm.move_to_home(gripper_open_0to1=1)
     time.sleep(1)
     arm.disconnect_arm()
