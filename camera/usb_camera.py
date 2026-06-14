@@ -1,5 +1,8 @@
 # 仅使用arm摄像头时可用（连接orb摄像头会导致序号改变）
 # 导入CV2模块
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import cv2
 import wmi
 from utils.cv2_display import show_image, poll_key, destroy_all_windows
@@ -37,22 +40,29 @@ def get_camera_list(class_guid = "{ca3e7ab9-b4c3-4ae6-8251-579ef933890f}") -> li
 
 def usb_camera_capture(camera_index = 1):
     # 选择摄像头的编号
-    cap = cv2.VideoCapture(camera_index)
+    # CAP_DSHOW 强制使用 DirectShow 后端，避免 OpenCV 的 obsensor 模块
+    # 错误接管 Orbbec 相机导致索引映射错乱、cap.read() 返回空帧
+    cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
 
     if cap.isOpened():
         # 读取摄像头的画面
         ret, frame = cap.read()
-        
-        # 保存到当前文件夹下
-        img_name = str(camera_index) + "_img.jpg"
-        cv2.imwrite(img_name, frame)
+
+        if ret and frame is not None:
+            # 保存到当前文件夹下
+            img_name = str(camera_index) + "_img.jpg"
+            cv2.imwrite(img_name, frame)
+        else:
+            print(f"Camera {camera_index}: read failed (ret={ret}, frame is {'None' if frame is None else 'valid'})")
 
     # 释放画面
     cap.release()
 
 def usb_camera_show(camera_index = 1):
     # 选择摄像头的编号
-    cap = cv2.VideoCapture(camera_index)
+    # CAP_DSHOW 强制使用 DirectShow 后端，避免 OpenCV 的 obsensor 模块
+    # 错误接管 Orbbec 相机导致索引映射错乱、cap.read() 返回空帧
+    cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
     # 添加这句是可以用鼠标拖动弹出的窗体
     print("Press 'q' to exit")
     
