@@ -115,6 +115,7 @@ class PiperBySDK(Arm):
         angles_deg: Sequence[float | int] | None = None,
         gripper_open_0to1: float | int | None = None,
         step_callback: StepCallback | None = None,
+        block_until_reach: bool = True,
     ) -> bool:
         if gripper_open_0to1 is not None:
             if not 0 <= gripper_open_0to1 <= 1:
@@ -241,6 +242,7 @@ class PiperBySDK(Arm):
         self,
         gripper_open_0to1: float | None = None,
         step_callback: StepCallback | None = None,
+        block_until_reach: bool = False,
         safe_pos: bool = False,
     ) -> bool:
         """safe_pos表示是否要移动到可安全失能的位置"""
@@ -249,6 +251,7 @@ class PiperBySDK(Arm):
             angles,
             gripper_open_0to1=gripper_open_0to1,
             step_callback=step_callback,
+            block_until_reach=block_until_reach,
         )
 
     def move_to(
@@ -258,6 +261,7 @@ class PiperBySDK(Arm):
         rot_rad: float | int | None = None,
         euler_angles_deg_zyx: list[float] | None = None,
         step_callback: StepCallback | None = None,
+        block_until_reach: bool = False,
     ) -> bool:
         if len(pos) != 3:
             raise ValueError("位置参数格式错误，应该是[x, y, z]")
@@ -296,6 +300,7 @@ class PiperBySDK(Arm):
             angles_deg,
             gripper_open_0to1=gripper_open_0to1,
             step_callback=step_callback,
+            block_until_reach=block_until_reach,
         )
 
     def set_gripper(

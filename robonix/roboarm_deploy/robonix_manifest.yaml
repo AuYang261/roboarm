@@ -20,3 +20,7 @@ system:
 skill:
   - name: roboarm_grasp
     path: ../roboarm_skill
+  - name: roboarm_voice
+    path: ../voice_skill
+
+# run: `rbnx boot`

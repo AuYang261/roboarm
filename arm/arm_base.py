@@ -94,6 +94,7 @@ class Arm:
         angles_deg: Sequence[float | int] | None = None,
         gripper_open_0to1: float | None = None,
         step_callback: StepCallback | None = None,
+        block_until_reach: bool = False,
     ) -> bool:
         """设置关节角度和夹爪开合程度。
 
@@ -101,10 +102,12 @@ class Arm:
             angles_deg: 各关节角度，单位为度；`None` 表示保持当前关节角度。
             gripper_open_0to1: 夹爪开合程度，范围为 `[0, 1]`，越大越开；
                 `None` 表示保持当前夹爪状态。
+            block_until_reach: 是否阻塞直到到达目标，默认否。
 
         Returns:
             设置是否成功。
         """
+
         raise NotImplementedError(
             "set_arm_angles method must be implemented in subclass"
         )
@@ -160,15 +163,18 @@ class Arm:
         self,
         gripper_open_0to1: float | int | None = None,
         step_callback: StepCallback | None = None,
+        block_until_reach: bool = False,
     ) -> bool:
         """将机械臂移动到归零位。
 
         Args:
             gripper_open_0to1: 可选的夹爪开合程度，范围为 `[0, 1]`。
+            block_until_reach: 是否阻塞直到到达目标，默认否。
 
         Returns:
             移动是否成功。
         """
+
         raise NotImplementedError("move_to_home method must be implemented in subclass")
 
     def move_to(
@@ -178,6 +184,7 @@ class Arm:
         rot_rad: float | int | None = None,
         euler_angles_deg_zyx: list[float] | None = None,
         step_callback: StepCallback | None = None,
+        block_until_reach: bool = False,
     ) -> bool:
         """将末端移动到目标位置。
 
@@ -187,10 +194,12 @@ class Arm:
             rot_rad: 末端绕 z 轴的目标旋转角，单位为弧度；仅在未显式传入
                 `euler_angles_deg_zyx` 时生效。
             euler_angles_deg_zyx: 目标末端欧拉角 `[RZ, RY, RX]`，单位为度。
+            block_until_reach: 是否阻塞直到到达目标，默认否。
 
         Returns:
             移动是否成功。
         """
+
         raise NotImplementedError("move_to method must be implemented in subclass")
 
     def wait_until_reached(self, target_angles_deg: Sequence[float]) -> None:
@@ -206,7 +215,7 @@ class Arm:
         target = [float(angle) for angle in target_angles_deg]
         deadline = time.monotonic() + self.timeout_s
         while True:
-            current_angles_deg, _ = self.get_raw_joint_angles()
+            current_angles_deg, _ = self.get_arm_angles()
             if current_angles_deg is None:
                 continue
             if len(current_angles_deg) != len(target):

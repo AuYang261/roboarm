@@ -139,6 +139,7 @@ class LeroboArm(Arm):
         angles_deg: Sequence[float | int] | None = None,
         gripper_open_0to1: float | None = None,
         step_callback: StepCallback | None = None,
+        block_until_reach: bool = False,
     ) -> bool:
         joint_names = self._get_joint_names()
         target_joint_angles = None if angles_deg is None else list(angles_deg)
@@ -220,7 +221,7 @@ class LeroboArm(Arm):
                 return False
             time.sleep(0.5 / self.steps)
 
-        if self.arm_backend == "sim" and angles_deg is not None:
+        if (self.arm_backend == "sim" or block_until_reach) and angles_deg is not None:
             try:
                 self.wait_until_reached(desired_joint_angles)
             except TimeoutError as e:
@@ -285,11 +286,13 @@ class LeroboArm(Arm):
         self,
         gripper_open_0to1: float | None = None,
         step_callback: StepCallback | None = None,
+        block_until_reach: bool = False,
     ) -> bool:
         return self.set_arm_angles(
             [0, 0, 0, 0, 0],
             gripper_open_0to1=gripper_open_0to1,
             step_callback=step_callback,
+            block_until_reach=block_until_reach,
         )
 
     def move_to(
@@ -299,6 +302,7 @@ class LeroboArm(Arm):
         rot_rad: float | int | None = None,
         euler_angles_deg_zyx: list[float] | None = None,
         step_callback: StepCallback | None = None,
+        block_until_reach: bool = False,
     ) -> bool:
         if not hasattr(self, "chain"):
             raise ValueError("没有机械臂模型，无法使用位置控制")
@@ -323,6 +327,7 @@ class LeroboArm(Arm):
             angles_deg,
             gripper_open_0to1=gripper_open_0to1,
             step_callback=step_callback,
+            block_until_reach=block_until_reach,
         ):
             return False
         return True
