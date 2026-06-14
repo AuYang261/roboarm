@@ -1,0 +1,1403 @@
+commit 2146ee5ae1ff7b98b855ad6ea93f4aebe9529e58
+Author: hyl <172@qq.com>
+Date:   Sun Jun 14 16:15:50 2026 +0800
+
+    server
+
+diff --git a/.gitignore b/.gitignore
+index 9414eb3..e3333f4 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,3 +1,4 @@
++*.diff
+ output/
+ client/
+ lerobot_v30_to_v21-main/
+diff --git a/server/__init__.py b/server/__init__.py
+new file mode 100644
+index 0000000..de472b5
+--- /dev/null
++++ b/server/__init__.py
+@@ -0,0 +1,11 @@
++"""Being-H05 Remote Inference Server.
++
++Receives JPEG video streams from client, runs Being-H05 VLA inference,
++sends predicted action sequences back to client via UDP.
++
++Modules:
++    udp_receiver.py      — Non-blocking JPEG frame reception from :5002 / :5003
++    inference_engine.py  — Being-H05 model loading + inference
++    udp_sender.py        — Action JSON transmission to 192.168.2.5:5000
++    server_main.py       — Main entry point: orchestration loop
++"""
+diff --git a/server/inference_engine.py b/server/inference_engine.py
+new file mode 100644
+index 0000000..2c8d0c6
+--- /dev/null
++++ b/server/inference_engine.py
+@@ -0,0 +1,296 @@
++"""Inference engine — Being-H05 model loading + single-frame inference.
++
++Wraps BeingHPolicy for the remote server use case:
++
++Key design decision: the client sends video streams but NOT joint state.
++To bridge this gap, the engine maintains an estimated state that is
++updated from the predicted action after each inference. This works
++because in the Koch follower format, action = absolute joint position
++command, so the predicted action serves as a valid state estimate for
++the next inference step.
++
++State initialization: uses the per-joint mean values from the dataset
++metadata (loaded from the checkpoint's metadata.json).
++
++Usage:
++    engine = InferenceEngine(
++        checkpoint=".../0010000",
++        data_config_name="koch_follower",
++        dataset_name="koch_posttrain",
++        embodiment_tag="koch",
++    )
++    result = engine.infer(top_bgr, wrist_bgr)
++    # result: {"arm_joint_position": (16,5), "gripper_position": (16,1)}
++"""
++
++import json
++import logging
++import sys
++import time
++from pathlib import Path
++from typing import Any, Dict, Optional
++
++import numpy as np
++import torch
++
++# Ensure Being-H05 is importable
++_script_dir = Path(__file__).resolve().parent
++_beingh_root = _script_dir.parent / "Being-H05"
++if str(_beingh_root) not in sys.path:
++    sys.path.insert(0, str(_beingh_root))
++
++from BeingH.inference.beingh_policy import BeingHPolicy
++
++logger = logging.getLogger(__name__)
++
++# Default joint order for Koch follower (same as client)
++JOINT_NAMES = [
++    "shoulder_pan",
++    "shoulder_lift",
++    "elbow_flex",
++    "wrist_flex",
++    "wrist_roll",
++    "gripper",
++]
++
++# Default task instruction (matches training data)
++DEFAULT_INSTRUCTION = "pick the orange toy and place into box"
++
++# Fallback initial state (mean values from dataset). Overridden by
++# metadata means if available.
++FALLBACK_STATE_MEANS = np.array(
++    [7.90, -40.51, -13.79, -52.57, 2.06, 44.70],
++    dtype=np.float32,
++)
++
++
++class InferenceEngine:
++    """Load Being-H05 model and provide single-frame inference.
++
++    State estimation strategy:
++    - On init: state = metadata mean values
++    - After each inference: state = predicted_action[0] (first chunk step)
++
++    This self-consistent state feedback allows the server to operate
++    without receiving explicit motor state from the client.
++    """
++
++    def __init__(
++        self,
++        checkpoint: str,
++        data_config_name: str = "koch_follower",
++        dataset_name: str = "koch_posttrain",
++        embodiment_tag: str = "koch",
++        instruction: str = DEFAULT_INSTRUCTION,
++        device: str = "cuda" if torch.cuda.is_available() else "cpu",
++        enable_rtc: bool = False,
++        num_inference_timesteps: Optional[int] = None,
++        metadata_variant: Optional[str] = None,
++    ):
++        """Load the Being-H05 model and initialize state.
++
++        Args:
++            checkpoint: Path to the checkpoint directory
++                        (containing safetensors, config.json, metadata).
++            data_config_name: Data configuration name.
++            dataset_name: Dataset group name for metadata.
++            embodiment_tag: Robot embodiment identifier.
++            instruction: Task instruction text.
++            device: Inference device.
++            enable_rtc: Enable Real-Time Chunking (disabled by default
++                        for server — client handles chunking).
++            num_inference_timesteps: Override Flow Matching steps.
++            metadata_variant: Specific metadata variant for stats.
++        """
++        self._checkpoint = Path(checkpoint).resolve()
++        self._instruction = instruction
++        self._device = device
++
++        logger.info(f"Loading Being-H05 from: {self._checkpoint}")
++        t0 = time.perf_counter()
++
++        # Instruction template matching training
++        instruction_template = (
++            "According to the instruction '{task_description}', "
++            "what's the micro-step actions in the next {k} steps?"
++        )
++
++        self._policy = BeingHPolicy(
++            model_path=str(self._checkpoint),
++            data_config_name=data_config_name,
++            dataset_name=dataset_name,
++            embodiment_tag=embodiment_tag,
++            instruction_template=instruction_template,
++            max_view_num=-1,
++            use_fixed_view=False,
++            action_attn_mode="causal",
++            device=device,
++            enable_rtc=enable_rtc,
++            num_inference_timesteps=num_inference_timesteps,
++            metadata_variant=metadata_variant,
++        )
++
++        self._action_chunk_length = self._policy.action_chunk_length  # 16
++
++        # Initialize estimated state from metadata means
++        self._state_6d = self._load_initial_state()
++
++        load_time = time.perf_counter() - t0
++        logger.info(
++            f"InferenceEngine ready ({load_time:.1f}s) | "
++            f"chunk_length={self._action_chunk_length} | "
++            f"device={device} | "
++            f"rtc={enable_rtc}"
++        )
++        logger.info(
++            f"Initial state: {dict(zip(JOINT_NAMES, self._state_6d.round(1)))}"
++        )
++
++    def _load_initial_state(self) -> np.ndarray:
++        """Load initial state from metadata mean values.
++
++        Returns:
++            numpy array of shape (6,) — [sp, sl, ef, wf, wr, gripper].
++        """
++        try:
++            metadata_path = self._checkpoint / "koch_posttrain_metadata.json"
++            if metadata_path.exists():
++                with open(metadata_path, "r") as f:
++                    meta = json.load(f)
++                # Navigate to state statistics
++                stats = meta.get("koch_posttrain", meta)
++                if "koch_posttrain_variants" in meta:
++                    # Use first available variant
++                    variants = meta["koch_posttrain_variants"]
++                    first_key = next(iter(variants))
++                    stats = variants[first_key]
++                state_stats = stats.get("statistics", {}).get("state", {})
++                arm_mean = np.array(
++                    state_stats.get("arm_joint_position", {}).get("mean", FALLBACK_STATE_MEANS[:5]),
++                    dtype=np.float32,
++                )
++                grip_mean = np.array(
++                    state_stats.get("gripper_position", {}).get("mean", FALLBACK_STATE_MEANS[5:]),
++                    dtype=np.float32,
++                )
++                means = np.concatenate([arm_mean, grip_mean])
++                logger.info(f"Loaded initial state from metadata: {means.round(1)}")
++                return means
++        except Exception as e:
++            logger.warning(f"Failed to load metadata means: {e}")
++
++        logger.warning(f"Using fallback initial state: {FALLBACK_STATE_MEANS}")
++        return FALLBACK_STATE_MEANS.copy()
++
++    # ── Inference ────────────────────────────────────────────────────
++
++    def infer(
++        self,
++        top_bgr: np.ndarray,
++        wrist_bgr: np.ndarray,
++    ) -> Dict[str, Any]:
++        """Run single-frame inference and update estimated state.
++
++        Args:
++            top_bgr: Top camera frame, BGR (480, 640, 3) uint8.
++            wrist_bgr: Wrist camera frame, BGR (480, 640, 3) uint8.
++
++        Returns:
++            Dict with keys:
++                - arm_joint_position: (16, 5) float — predicted joint
++                  angles in degrees.
++                - gripper_position: (16, 1) float — predicted gripper
++                  position [0, 100].
++                - inference_time_ms: float — inference latency.
++        """
++        # Convert BGR → RGB for the model
++        top_rgb = _bgr_to_rgb(top_bgr)
++        wrist_rgb = _bgr_to_rgb(wrist_bgr)
++
++        # Build observation dict
++        # Note: state keys must come first (see §3.1 issue #2 in H05推理.md)
++        obs = {
++            "state.arm_joint_position": self._state_6d[:5].copy().astype(np.float32),
++            "state.gripper_position": self._state_6d[5:6].copy().astype(np.float32),
++            "video.above": top_rgb.astype(np.uint8),
++            "video.wrist": wrist_rgb.astype(np.uint8),
++            "language.instruction": [self._instruction],
++        }
++
++        # Run inference
++        t0 = time.perf_counter()
++        result = self._policy.get_action(obs)
++        elapsed_ms = (time.perf_counter() - t0) * 1000.0
++
++        # Extract predictions
++        arm_joint = np.array(result["action.arm_joint_position"], dtype=np.float32)
++        gripper = np.array(result["action.gripper_position"], dtype=np.float32)
++
++        # Update state estimate from first predicted step
++        # (action = absolute position in Koch format)
++        pred_step0 = np.concatenate([arm_joint[0], gripper[0]], axis=-1)
++        self._state_6d = pred_step0.astype(np.float32)
++
++        logger.debug(
++            f"Inference: {elapsed_ms:.1f}ms | "
++            f"arm[0]={arm_joint[0].round(1)} | "
++            f"gripper[0]={gripper[0].round(1)}"
++        )
++
++        return {
++            "arm_joint_position": arm_joint.tolist(),    # (16, 5)
++            "gripper_position": gripper.tolist(),         # (16, 1)
++            "inference_time_ms": round(elapsed_ms, 1),
++        }
++
++    # ── State management ─────────────────────────────────────────────
++
++    def set_state(self, state_6d: np.ndarray) -> None:
++        """Override the estimated state (e.g., from client feedback).
++
++        Args:
++            state_6d: Joint state (6,) in degrees
++                      [sp, sl, ef, wf, wr, gripper].
++        """
++        if state_6d.shape != (6,):
++            raise ValueError(f"Expected state shape (6,), got {state_6d.shape}")
++        self._state_6d = state_6d.astype(np.float32).copy()
++        logger.debug(f"State set: {dict(zip(JOINT_NAMES, self._state_6d.round(1)))}")
++
++    def get_state(self) -> np.ndarray:
++        """Return the current estimated state.
++
++        Returns:
++            numpy array (6,) in degrees.
++        """
++        return self._state_6d.copy()
++
++    def reset_state(self) -> None:
++        """Reset state to metadata mean values."""
++        self._state_6d = self._load_initial_state()
++        logger.info("State reset to metadata means")
++
++    # ── Properties ───────────────────────────────────────────────────
++
++    @property
++    def action_chunk_length(self) -> int:
++        """Action chunk length (16)."""
++        return self._action_chunk_length
++
++    @property
++    def instruction(self) -> str:
++        """Current task instruction."""
++        return self._instruction
++
++    @property
++    def policy(self) -> BeingHPolicy:
++        """The underlying BeingHPolicy instance."""
++        return self._policy
++
++
++# ── Helpers ──────────────────────────────────────────────────────────
++
++
++def _bgr_to_rgb(frame: np.ndarray) -> np.ndarray:
++    """Convert BGR (OpenCV default) to RGB for the model."""
++    return frame[..., ::-1].copy()  # BGR → RGB
+diff --git a/server/server_main.py b/server/server_main.py
+new file mode 100644
+index 0000000..b96e578
+--- /dev/null
++++ b/server/server_main.py
+@@ -0,0 +1,371 @@
++#!/usr/bin/env python3
++"""Being-H05 Remote Inference Server — main entry point.
++
++Receives JPEG video streams from client via UDP (:5002 top, :5003 wrist),
++runs Being-H05 VLA inference, sends predicted action sequences back to
++client via UDP (192.168.2.5:5000).
++
++Architecture:
++    ┌─────────────────────────────────────────────────────┐
++    │                  server_main.py                     │
++    │                                                     │
++    │  :5002 ─→ FrameReceiver ─┐                          │
++    │                           ├─→ InferenceEngine.infer()│
++    │  :5003 ─→ FrameReceiver ─┘     │                    │
++    │                                 ▼                    │
++    │                           Action JSON                │
++    │                                 │                    │
++    │                    192.168.2.5:5000 ←─ ActionSender  │
++    └─────────────────────────────────────────────────────┘
++
++Usage:
++    # Default settings
++    python server/server_main.py
++
++    # Custom checkpoint and ports
++    python server/server_main.py \\
++        --checkpoint Being-H05/checkpoints/koch_all_data_20260603_214251/0010000 \\
++        --top-port 5002 \\
++        --wrist-port 5003 \\
++        --action-host 192.168.2.5 \\
++        --action-port 5000
++
++    # With task metadata variant
++    python server/server_main.py \\
++        --metadata-variant pick_orange_simple_shape
++"""
++
++import argparse
++import logging
++import signal
++import sys
++import time
++from pathlib import Path
++
++# Ensure project root and Being-H05 are importable
++_script_dir = Path(__file__).resolve().parent
++_project_root = _script_dir.parent
++if str(_project_root) not in sys.path:
++    sys.path.insert(0, str(_project_root))
++
++from server.udp_receiver import DualReceiver
++from server.inference_engine import InferenceEngine
++from server.udp_sender import ActionSender, DEFAULT_ACTION_HOST, DEFAULT_ACTION_PORT
++
++logger = logging.getLogger(__name__)
++
++# Defaults
++DEFAULT_CHECKPOINT = "Being-H05/checkpoints/koch_all_data_20260603_214251/0010000"
++DEFAULT_TOP_PORT = 5002
++DEFAULT_WRIST_PORT = 5003
++DEFAULT_INFERENCE_INTERVAL_MS = 66  # ~15 FPS inference rate
++
++
++class InferenceServer:
++    """Top-level server orchestrating UDP receive → inference → UDP send."""
++
++    def __init__(self, config: argparse.Namespace):
++        self._config = config
++        self._running = False
++        self._sequence_id = 0
++        self._inference_count = 0
++        self._start_time = 0.0
++
++        # Sub-modules (created in start)
++        self._receiver: DualReceiver | None = None
++        self._engine: InferenceEngine | None = None
++        self._sender: ActionSender | None = None
++
++    # ── Lifecycle ────────────────────────────────────────────────────
++
++    def start(self) -> None:
++        """Initialize all modules and enter the main inference loop."""
++        logger.info("=" * 60)
++        logger.info("  Being-H05 Remote Inference Server")
++        logger.info(f"  Checkpoint: {self._config.checkpoint}")
++        logger.info(f"  Receiving:  0.0.0.0:{self._config.top_port} (top)")
++        logger.info(f"              0.0.0.0:{self._config.wrist_port} (wrist)")
++        logger.info(f"  Sending:    {self._config.action_host}:{self._config.action_port}")
++        logger.info(f"  Inference interval: {self._config.inference_interval_ms}ms")
++        logger.info(f"  RTC: {'enabled' if self._config.enable_rtc else 'disabled'}")
++        logger.info("=" * 60)
++
++        # ── Initialize modules ──
++        logger.info("Initializing UDP receivers...")
++        self._receiver = DualReceiver(
++            top_port=self._config.top_port,
++            wrist_port=self._config.wrist_port,
++            timeout_ms=self._config.receiver_timeout_ms,
++        )
++
++        logger.info("Loading Being-H05 model...")
++        self._engine = InferenceEngine(
++            checkpoint=self._config.checkpoint,
++            data_config_name=self._config.data_config_name,
++            dataset_name=self._config.dataset_name,
++            embodiment_tag=self._config.embodiment_tag,
++            instruction=self._config.task,
++            device=self._config.device,
++            enable_rtc=self._config.enable_rtc,
++            num_inference_timesteps=self._config.num_inference_timesteps,
++            metadata_variant=self._config.metadata_variant,
++        )
++
++        logger.info("Initializing action sender...")
++        self._sender = ActionSender(
++            remote_host=self._config.action_host,
++            remote_port=self._config.action_port,
++        )
++
++        # ── Wait for first frames ──
++        logger.info("Waiting for video streams from client...")
++        wait_start = time.perf_counter()
++        while not self._receiver.both_ready():
++            if time.perf_counter() - wait_start > 30.0:
++                logger.error(
++                    "Timeout waiting for video streams (30s). "
++                    "Check that the client is running and sending to the correct ports."
++                )
++                self.stop()
++                return
++            time.sleep(0.1)
++        logger.info(
++            f"Both streams active (top: {self._receiver.top.packets_received} pkts, "
++            f"wrist: {self._receiver.wrist.packets_received} pkts)"
++        )
++
++        # ── Main loop ──
++        self._running = True
++        self._start_time = time.perf_counter()
++        try:
++            self._main_loop()
++        except KeyboardInterrupt:
++            logger.info("Interrupted by user")
++        finally:
++            self.stop()
++
++    def stop(self) -> None:
++        """Cleanly shut down all modules."""
++        self._running = False
++
++        if self._sender is not None:
++            self._sender.close()
++        if self._receiver is not None:
++            self._receiver.close()
++
++        # Summary
++        elapsed = time.perf_counter() - self._start_time
++        logger.info("=" * 60)
++        logger.info("  Server stopped")
++        logger.info(f"  Inferences: {self._inference_count}")
++        logger.info(f"  Duration: {elapsed:.1f}s")
++        if elapsed > 0:
++            logger.info(f"  Avg rate: {self._inference_count / elapsed:.1f} Hz")
++        if self._sender is not None:
++            logger.info(f"  Actions sent: {self._sender.packets_sent}")
++            logger.info(f"  Data sent: {self._sender.bytes_sent / 1e3:.1f} KB")
++        logger.info("=" * 60)
++
++    # ── Main Loop ────────────────────────────────────────────────────
++
++    def _main_loop(self) -> None:
++        """Main inference loop:
++        1. Receive latest frames from both cameras
++        2. If both frames available, run inference
++        3. Send action JSON to client
++        4. Pace to target inference rate
++        """
++        interval_s = self._config.inference_interval_ms / 1000.0
++        fps_smooth = 1.0 / interval_s if interval_s > 0 else 15.0
++
++        logger.info(
++            f"Main loop started (interval={interval_s:.3f}s, "
++            f"target={1.0/interval_s:.1f} Hz)"
++        )
++
++        while self._running:
++            loop_start = time.perf_counter()
++
++            # 1. Receive latest frames
++            frames = self._receiver.recv_both()
++
++            # 2. Run inference if both frames are available
++            if frames.top_bgr is not None and frames.wrist_bgr is not None:
++                try:
++                    result = self._engine.infer(frames.top_bgr, frames.wrist_bgr)
++                    inference_ms = result["inference_time_ms"]
++
++                    # 3. Send action to client
++                    self._sequence_id += 1
++                    action_msg = {
++                        "sequence_id": self._sequence_id,
++                        "chunk_size": self._engine.action_chunk_length,
++                        "inference_time_ms": inference_ms,
++                        "action": {
++                            "arm_joint_position": result["arm_joint_position"],
++                            "gripper_position": result["gripper_position"],
++                        },
++                    }
++                    self._sender.send_json(action_msg)
++                    self._inference_count += 1
++
++                    # Periodic status
++                    if self._inference_count % 150 == 0:
++                        elapsed = time.perf_counter() - self._start_time
++                        logger.info(
++                            f"[inference {self._inference_count}] "
++                            f"seq={self._sequence_id} | "
++                            f"latency={inference_ms:.0f}ms | "
++                            f"rate={self._inference_count / elapsed:.1f} Hz | "
++                            f"fps={fps_smooth:.1f}"
++                        )
++
++                except Exception as e:
++                    logger.error(f"Inference failed: {e}", exc_info=True)
++
++            # 4. Frame rate control
++            elapsed = time.perf_counter() - loop_start
++            if elapsed < interval_s:
++                time.sleep(interval_s - elapsed)
++            actual_elapsed = time.perf_counter() - loop_start
++            if actual_elapsed > 0:
++                fps_smooth = 0.9 * fps_smooth + 0.1 * (1.0 / actual_elapsed)
++
++
++# ── CLI ──────────────────────────────────────────────────────────────
++
++
++def parse_args() -> argparse.Namespace:
++    """Parse command-line arguments."""
++    parser = argparse.ArgumentParser(
++        description="Being-H05 Remote Inference Server",
++        formatter_class=argparse.RawDescriptionHelpFormatter,
++        epilog="""
++Examples:
++  # Default settings
++  python server/server_main.py
++
++  # Custom checkpoint
++  python server/server_main.py \\
++      --checkpoint Being-H05/checkpoints/koch_all_data_20260603_214251/0010000
++
++  # Enable RTC mode
++  python server/server_main.py --enable-rtc
++
++  # With metadata variant
++  python server/server_main.py --metadata-variant pick_orange_simple_shape
++        """,
++    )
++
++    # Checkpoint
++    parser.add_argument(
++        "--checkpoint", type=str, default=DEFAULT_CHECKPOINT,
++        help="Path to Being-H05 checkpoint directory",
++    )
++
++    # Network — receive
++    parser.add_argument(
++        "--top-port", type=int, default=DEFAULT_TOP_PORT,
++        help="UDP port for top camera (default: 5002)",
++    )
++    parser.add_argument(
++        "--wrist-port", type=int, default=DEFAULT_WRIST_PORT,
++        help="UDP port for wrist camera (default: 5003)",
++    )
++    parser.add_argument(
++        "--receiver-timeout-ms", type=int, default=5,
++        help="UDP recvfrom timeout in ms (default: 5)",
++    )
++
++    # Network — send
++    parser.add_argument(
++        "--action-host", type=str, default=DEFAULT_ACTION_HOST,
++        help="Client IP for action delivery (default: 192.168.2.5)",
++    )
++    parser.add_argument(
++        "--action-port", type=int, default=DEFAULT_ACTION_PORT,
++        help="Client UDP port for action delivery (default: 5000)",
++    )
++
++    # Inference
++    parser.add_argument(
++        "--inference-interval-ms", type=int, default=DEFAULT_INFERENCE_INTERVAL_MS,
++        help="Min interval between inference cycles in ms (default: 66, ~15Hz)",
++    )
++    parser.add_argument(
++        "--task", type=str, default="pick the orange toy and place into box",
++        help="Task instruction for inference",
++    )
++    parser.add_argument(
++        "--device", type=str, default="cuda",
++        help="Inference device (default: cuda)",
++    )
++    parser.add_argument(
++        "--enable-rtc", action="store_true", default=False,
++        help="Enable Real-Time Chunking with prefix locking",
++    )
++    parser.add_argument(
++        "--num-inference-timesteps", type=int, default=None,
++        help="Override Flow Matching ODE steps",
++    )
++    parser.add_argument(
++        "--data-config-name", type=str, default="koch_follower",
++        help="Data config name (default: koch_follower)",
++    )
++    parser.add_argument(
++        "--dataset-name", type=str, default="koch_posttrain",
++        help="Dataset name for metadata (default: koch_posttrain)",
++    )
++    parser.add_argument(
++        "--embodiment-tag", type=str, default="koch",
++        help="Robot embodiment tag (default: koch)",
++    )
++    parser.add_argument(
++        "--metadata-variant", type=str, default=None,
++        help="Metadata variant for normalization stats",
++    )
++
++    # Logging
++    parser.add_argument(
++        "--log-level", type=str, default="INFO",
++        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
++        help="Logging level (default: INFO)",
++    )
++
++    return parser.parse_args()
++
++
++def main():
++    args = parse_args()
++
++    logging.basicConfig(
++        level=getattr(logging, args.log_level.upper(), logging.INFO),
++        format="%(asctime)s [%(levelname)-8s] %(message)s",
++        datefmt="%H:%M:%S",
++    )
++
++    # Resolve checkpoint path
++    checkpoint = Path(args.checkpoint)
++    if not checkpoint.is_absolute():
++        checkpoint = Path.cwd() / checkpoint
++    args.checkpoint = str(checkpoint.resolve())
++
++    if not checkpoint.exists():
++        logger.error(f"Checkpoint not found: {checkpoint}")
++        sys.exit(1)
++
++    # Handle graceful shutdown
++    server = InferenceServer(args)
++
++    def _signal_handler(signum, frame):
++        logger.info(f"Received signal {signum}, shutting down...")
++        server._running = False
++
++    signal.signal(signal.SIGINT, _signal_handler)
++    signal.signal(signal.SIGTERM, _signal_handler)
++
++    server.start()
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/server/udp_receiver.py b/server/udp_receiver.py
+new file mode 100644
+index 0000000..8d8edf2
+--- /dev/null
++++ b/server/udp_receiver.py
+@@ -0,0 +1,262 @@
++"""UDP receiver — bind two ports, non-blocking, receive JPEG frames.
++
++Design mirrors client/udp_receiver.py patterns:
++  - socket(AF_INET, SOCK_DGRAM) + SO_REUSEADDR
++  - settimeout for non-blocking recvfrom
++  - recv() returns bytes | None
++  - recv_jpeg() returns raw JPEG bytes
++
++Binds:
++  - 0.0.0.0:5002 → top camera JPEG
++  - 0.0.0.0:5003 → wrist camera JPEG
++
++Each received datagram = one complete JPEG file (no headers, no fragmentation).
++"""
++
++import logging
++import socket
++from dataclasses import dataclass
++from typing import Tuple
++
++import numpy as np
++import cv2
++
++logger = logging.getLogger(__name__)
++
++# Maximum UDP payload size (64KB minus headers)
++UDP_MAX_PAYLOAD = 65536
++
++
++class FrameReceiver:
++    """Bind a single port, receive raw datagrams non-blocking.
++
++    Usage:
++        rx = FrameReceiver("0.0.0.0", 5002, timeout_ms=10)
++        jpeg_bytes = rx.recv()        # bytes | None
++        bgr_frame  = rx.recv_frame()  # np.ndarray (H,W,3) | None
++        rx.close()
++    """
++
++    def __init__(
++        self,
++        local_host: str = "0.0.0.0",
++        local_port: int = 5002,
++        timeout_ms: int = 10,
++    ):
++        """Create and bind a UDP socket.
++
++        Args:
++            local_host: IP to bind (typically "0.0.0.0" for all interfaces).
++            local_port: Port to bind.
++            timeout_ms: recvfrom timeout in milliseconds for non-blocking
++                        behavior. 0 for true non-blocking (requires error
++                        handling), small values like 5-10ms for polling.
++        """
++        self._local_host = local_host
++        self._local_port = local_port
++        self._timeout_ms = timeout_ms
++        self._packets_received = 0
++        self._bytes_received = 0
++
++        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
++        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
++        if timeout_ms > 0:
++            self._sock.settimeout(timeout_ms / 1000.0)
++        self._sock.bind((local_host, local_port))
++        logger.info(f"FrameReceiver bound to {local_host}:{local_port} "
++                     f"(timeout={timeout_ms}ms)")
++
++    # ── Raw reception ────────────────────────────────────────────────
++
++    def recv(self) -> bytes | None:
++        """Non-blocking: try to receive a single datagram.
++
++        Returns:
++            Raw JPEG bytes, or None if no data was available within
++            the configured timeout.
++        """
++        try:
++            data, _addr = self._sock.recvfrom(UDP_MAX_PAYLOAD)
++            self._bytes_received += len(data)
++            self._packets_received += 1
++            return data
++        except socket.timeout:
++            return None
++        except OSError as e:
++            logger.warning(f"UDP recvfrom error on {self._local_port}: {e}")
++            return None
++
++    # ── JPEG decoding ────────────────────────────────────────────────
++
++    def recv_frame(self) -> np.ndarray | None:
++        """Receive a datagram and decode it as a BGR frame.
++
++        Returns:
++            BGR numpy array of shape (H, W, 3) uint8, or None on
++            timeout / decode failure.
++        """
++        data = self.recv()
++        if data is None:
++            return None
++        try:
++            # Decode JPEG → BGR (OpenCV default)
++            frame = cv2.imdecode(
++                np.frombuffer(data, dtype=np.uint8),
++                cv2.IMREAD_COLOR,
++            )
++            if frame is None:
++                logger.warning(f"cv2.imdecode returned None on port {self._local_port}")
++                return None
++            return frame
++        except Exception as e:
++            logger.warning(f"JPEG decode error on port {self._local_port}: {e}")
++            return None
++
++    # ── Properties ───────────────────────────────────────────────────
++
++    @property
++    def packets_received(self) -> int:
++        """Cumulative packets received."""
++        return self._packets_received
++
++    @property
++    def bytes_received(self) -> int:
++        """Cumulative bytes received over this socket."""
++        return self._bytes_received
++
++    @property
++    def local_addr(self) -> Tuple[str, int]:
++        """The (host, port) this socket is bound to."""
++        return self._sock.getsockname()
++
++    # ── Lifecycle ─────────────────────────────────────────────────────
++
++    def close(self) -> None:
++        """Close the UDP socket."""
++        try:
++            self._sock.close()
++        except OSError:
++            pass
++        logger.debug(
++            f"FrameReceiver :{self._local_port} closed "
++            f"({self._packets_received} packets, "
++            f"{self._bytes_received / 1e6:.1f} MB)"
++        )
++
++    def __enter__(self):
++        return self
++
++    def __exit__(self, exc_type, exc_val, exc_tb):
++        self.close()
++        return False
++
++
++# ── Dual-receiver helper ─────────────────────────────────────────────
++
++
++@dataclass
++class DualFrame:
++    """Simultaneously received frames from both cameras."""
++    top_bgr: np.ndarray | None    # (480, 640, 3) BGR uint8
++    wrist_bgr: np.ndarray | None  # (480, 640, 3) BGR uint8
++    top_bytes: int = 0
++    wrist_bytes: int = 0
++
++
++class DualReceiver:
++    """Manage two FrameReceiver instances for top + wrist camera.
++
++    Usage:
++        dual = DualReceiver(top_port=5002, wrist_port=5003, timeout_ms=5)
++        frames = dual.recv_both()  # DualFrame
++        dual.close()
++    """
++
++    def __init__(
++        self,
++        top_port: int = 5002,
++        wrist_port: int = 5003,
++        timeout_ms: int = 5,
++    ):
++        """Bind both receivers.
++
++        Args:
++            top_port: Port for top camera JPEG stream.
++            wrist_port: Port for wrist camera JPEG stream.
++            timeout_ms: recvfrom timeout for both receivers.
++        """
++        self.top = FrameReceiver("0.0.0.0", top_port, timeout_ms=timeout_ms)
++        self.wrist = FrameReceiver("0.0.0.0", wrist_port, timeout_ms=timeout_ms)
++
++    def recv_both(self) -> DualFrame:
++        """Non-blocking: read latest frame from each receiver.
++
++        Each call to recv_both() drains all queued frames on each
++        receiver, keeping only the last one per camera. This ensures
++        we always work with the most recent frame from each stream.
++
++        Returns:
++            DualFrame with the latest BGR frames (may be None if
++            no data has arrived yet).
++        """
++        top_last = None
++        top_bytes = 0
++        while True:
++            data = self.top.recv()
++            if data is None:
++                break
++            top_bytes = len(data)
++            top_last = data
++
++        wrist_last = None
++        wrist_bytes = 0
++        while True:
++            data = self.wrist.recv()
++            if data is None:
++                break
++            wrist_bytes = len(data)
++            wrist_last = data
++
++        # Decode JPEG → BGR
++        top_bgr = _decode_jpeg(top_last) if top_last is not None else None
++        wrist_bgr = _decode_jpeg(wrist_last) if wrist_last is not None else None
++
++        return DualFrame(
++            top_bgr=top_bgr,
++            wrist_bgr=wrist_bgr,
++            top_bytes=top_bytes,
++            wrist_bytes=wrist_bytes,
++        )
++
++    def both_ready(self) -> bool:
++        """Check if both cameras have delivered at least one frame.
++
++        Returns:
++            True if both receivers have received data.
++        """
++        return self.top.packets_received > 0 and self.wrist.packets_received > 0
++
++    def close(self) -> None:
++        """Close both receivers."""
++        self.top.close()
++        self.wrist.close()
++
++    def __enter__(self):
++        return self
++
++    def __exit__(self, exc_type, exc_val, exc_tb):
++        self.close()
++        return False
++
++
++def _decode_jpeg(data: bytes) -> np.ndarray | None:
++    """Decode JPEG bytes to BGR ndarray."""
++    try:
++        frame = cv2.imdecode(
++            np.frombuffer(data, dtype=np.uint8),
++            cv2.IMREAD_COLOR,
++        )
++        return frame
++    except Exception as e:
++        logger.warning(f"JPEG decode error: {e}")
++        return None
+diff --git a/server/udp_sender.py b/server/udp_sender.py
+new file mode 100644
+index 0000000..7d89106
+--- /dev/null
++++ b/server/udp_sender.py
+@@ -0,0 +1,135 @@
++"""UDP sender — transmit action JSON to the client robot.
++
++Design mirrors client/udp_sender.py patterns:
++  - socket(AF_INET, SOCK_DGRAM) + SO_REUSEADDR
++  - send_json(obj) serializes and sends in one datagram
++  - send(data) sends raw bytes
++
++Target: 192.168.2.5:5000 (the client robot).
++Each datagram = one complete JSON, UTF-8 encoded, no headers.
++"""
++
++import json
++import logging
++import socket
++from typing import Any
++
++logger = logging.getLogger(__name__)
++
++# Default target (the client robot)
++DEFAULT_ACTION_HOST = "192.168.2.5"
++DEFAULT_ACTION_PORT = 5000
++
++
++class ActionSender:
++    """Send action JSON datagrams to the client robot.
++
++    Usage:
++        sender = ActionSender("192.168.2.5", 5000)
++        sender.send_json({
++            "sequence_id": 1,
++            "chunk_size": 16,
++            "inference_time_ms": 85.3,
++            "action": {
++                "arm_joint_position": [[...] * 16],
++                "gripper_position": [[...] * 16],
++            },
++        })
++        sender.close()
++    """
++
++    def __init__(
++        self,
++        remote_host: str = DEFAULT_ACTION_HOST,
++        remote_port: int = DEFAULT_ACTION_PORT,
++    ):
++        """Create a UDP socket targeting the client.
++
++        Args:
++            remote_host: Client robot IP address.
++            remote_port: Client action receiver port.
++        """
++        self._remote_host = remote_host
++        self._remote_port = remote_port
++        self._addr = (remote_host, remote_port)
++        self._packets_sent = 0
++        self._bytes_sent = 0
++
++        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
++        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
++        logger.info(f"ActionSender ready → {remote_host}:{remote_port}")
++
++    # ── Sending ──────────────────────────────────────────────────────
++
++    def send(self, data: bytes) -> int:
++        """Send raw bytes in a single datagram.
++
++        Args:
++            data: Raw bytes to send.
++
++        Returns:
++            Number of bytes sent.
++        """
++        try:
++            n = self._sock.sendto(data, self._addr)
++            self._bytes_sent += n
++            self._packets_sent += 1
++            return n
++        except OSError:
++            logger.error(f"UDP sendto failed → {self._addr}", exc_info=True)
++            raise
++
++    def send_json(self, obj: Any) -> int:
++        """Serialize object as JSON and send in one datagram.
++
++        Args:
++            obj: Any JSON-serializable Python object.
++
++        Returns:
++            Number of bytes sent (after UTF-8 encoding).
++        """
++        data = json.dumps(obj, ensure_ascii=False).encode("utf-8")
++        n = self.send(data)
++        logger.debug(
++            f"Sent action seq={obj.get('sequence_id', '?')} "
++            f"({n} bytes) → {self._remote_host}:{self._remote_port}"
++        )
++        return n
++
++    # ── Properties ───────────────────────────────────────────────────
++
++    @property
++    def packets_sent(self) -> int:
++        """Cumulative packets sent."""
++        return self._packets_sent
++
++    @property
++    def bytes_sent(self) -> int:
++        """Cumulative bytes sent."""
++        return self._bytes_sent
++
++    @property
++    def remote_addr(self) -> tuple:
++        """The target (host, port)."""
++        return self._addr
++
++    # ── Lifecycle ─────────────────────────────────────────────────────
++
++    def close(self) -> None:
++        """Close the UDP socket."""
++        try:
++            self._sock.close()
++        except OSError:
++            pass
++        logger.debug(
++            f"ActionSender closed "
++            f"({self._packets_sent} packets, "
++            f"{self._bytes_sent} bytes)"
++        )
++
++    def __enter__(self):
++        return self
++
++    def __exit__(self, exc_type, exc_val, exc_tb):
++        self.close()
++        return False
+diff --git "a/\346\234\215\345\212\241\347\253\257\351\200\202\351\205\215.md" "b/\346\234\215\345\212\241\347\253\257\351\200\202\351\205\215.md"
+index 686ca15..6672fab 100644
+--- "a/\346\234\215\345\212\241\347\253\257\351\200\202\351\205\215.md"
++++ "b/\346\234\215\345\212\241\347\253\257\351\200\202\351\205\215.md"
+@@ -78,13 +78,259 @@ action.gripper_position	float[16][1]	16步×1夹爪 [0,100]
+ 4. 构造上述 JSON → sendto(192.168.2.5:5000)
+ 5. sequence_id 递增
+ 
+-## 需要修改/新建的文件
++## 服务端代码架构
+ 
+-- server/__init__.py (新建)
+-- server/server_main.py (新建) — 主入口：UDP 接收 + 推理循环
+-- server/udp_receiver.py (新建) — 绑定 :5002 / :5003，非阻塞接收
+-- server/udp_sender.py (新建) — 发送 JSON 到 192.168.2.5:5000
+-- server/inference_engine.py (新建) — Being-H05 模型加载 + infer()
++metadata mean → state_init
++      ↓
++每帧: Observation{video + state_estimate} → BeingHPolicy.infer()
++      ↓
++state_estimate ← predicted_action[0]   (Koch 格式中 action=绝对位置)
++      ↓
++发送全部 16 步给客户端
++执行命令
++
++cd /home/hyl/Being-H
++conda activate beingh
++
++### 命令
++
++python server/server_main.py \
++    --checkpoint Being-H05/checkpoints/koch_all_data_20260603_214251/0010000 \
++    --top-port 5002 \
++    --wrist-port 5003 \
++    --action-host 192.168.2.5 \
++    --action-port 5000
++
++### 文件结构
++
++```
++server/
++├── __init__.py              # 包入口，模块说明
++├── udp_receiver.py          # UDP 视频流接收（FrameReceiver + DualReceiver）
++├── inference_engine.py      # Being-H05 模型加载 + 推理（InferenceEngine）
++├── udp_sender.py            # UDP 动作 JSON 发送（ActionSender）
++└── server_main.py           # 主入口（InferenceServer → 主循环）
++```
++
++### 整体架构
++
++```
++┌──────────────────────────────────────────────────────────────────────┐
++│  server_main.py (InferenceServer)                                    │
++│                                                                      │
++│  ① :5002 ─→ FrameReceiver ─┐                                        │
++│                              │                                        │
++│  ② :5003 ─→ FrameReceiver ─┤                                        │
++│                              │                                        │
++│               DualReceiver.recv_both()                                │
++│                 → 排空队列取每路最新帧                                  │
++│                 → cv2.imdecode JPEG → BGR ndarray                     │
++│                              │                                        │
++│                              ▼                                        │
++│  ③ InferenceEngine.infer(top_bgr, wrist_bgr)                         │
++│       │                                                              │
++│       ├─ BGR → RGB 转换                                              │
++│       ├─ 组装 Observation:                                           │
++│       │    {state.arm_joint_position, state.gripper_position,         │
++│       │     video.above, video.wrist, language.instruction}           │
++│       ├─ BeingHPolicy.get_action()                                    │
++│       │    → ViT 编码 × 2图 (128 tokens)                              │
++│       │    → LLM + Action Expert (Qwen3-1.7B MoE)                     │
++│       │    → Flow Matching ODE 4步积分                                │
++│       │    → 去归一化 → 关节角度                                       │
++│       └─ 状态更新 (state = pred[0])                                   │
++│                              │                                        │
++│                              ▼                                        │
++│  ④ ActionSender.send_json()                                          │
++│       → {"sequence_id", "chunk_size", "inference_time_ms", "action"}  │
++│       → 192.168.2.5:5000                                              │
++│                                                                      │
++│  ⑤ 速率控制: ~15Hz 推理节拍                                           │
++└──────────────────────────────────────────────────────────────────────┘
++```
++
++### 各模块详解
++
++#### server/__init__.py
++包入口，文档说明四个模块的功能和所属包结构。
++
++#### server/udp_receiver.py — 视频流接收模块
++
++**设计原则**：与客户端 `client/udp_receiver.py` 保持一致的接口风格。
++
++**核心类**：
++
++| 类 | 功能 |
++|----|------|
++| `FrameReceiver` | 单路 UDP 接收器。绑定一个端口 → `recv()` 返回原始字节 → `recv_frame()` 解码为 BGR ndarray |
++| `DualReceiver` | 双路接收管理器。包装两个 FrameReceiver（:5002/:5003），`recv_both()` 排空每路队列取最新帧 |
++
++**关键实现**：
++```python
++class FrameReceiver:
++    def __init__(self, host="0.0.0.0", port=5002, timeout_ms=10):
++        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
++        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
++        self._sock.settimeout(timeout_ms / 1000.0)  # 非阻塞
++        self._sock.bind((host, port))
++
++    def recv(self) -> bytes | None:
++        try: return self._sock.recvfrom(65536)[0]
++        except socket.timeout: return None
++
++    def recv_frame(self) -> np.ndarray | None:
++        data = self.recv()
++        if data is None: return None
++        return cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
++```
++
++**DualReceiver.recv_both()** 采用"排空队列取最后一帧"策略：
++- 每路持续 recv 直到返回 None（timeout）
++- 保留最后一次收到的 JPEG 数据
++- 解码为 BGR ndarray 返回
++- 这确保推理始终使用最新帧，不会堆积延迟
++
++#### server/inference_engine.py — 推理引擎模块
++
++**核心类**：`InferenceEngine`
++
++**状态估计策略**（关键设计决策）：
++
++客户端只发送视频流，不发送关节状态。但 Being-H05 模型需要状态输入。解决方案：
++
++1. **初始化**：从 checkpoint 的 `*_metadata.json` 中读取每关节的 mean 值作为初始状态
++2. **推理后更新**：`state ← predicted_action[0]`（取 16 步预测的第 1 步）
++3. **可行性**：Koch follower 格式中 action = 绝对关节位置命令，因此预测值即是当前状态的有效估计
++
++**公开方法**：
++
++| 方法 | 功能 |
++|------|------|
++| `__init__(checkpoint, ...)` | 加载 BeingHPolicy 模型，初始化状态 |
++| `infer(top_bgr, wrist_bgr) → dict` | 单帧推理，返回 `{"arm_joint_position": list, "gripper_position": list, "inference_time_ms": float}` |
++| `set_state(state_6d)` | 从外部设置状态（如客户端将来发送状态反馈） |
++| `get_state() → np.ndarray` | 读取当前估计状态 |
++| `reset_state()` | 重置为 metadata mean 值 |
++
++**图像处理**：
++- 输入 BGR（OpenCV 格式）→ `frame[..., ::-1]` 转为 RGB
++- 后续由 BeingHPolicy 内部 `image_transform` 处理：Resize(224) → CenterCrop(224) → ToTensor → ImageNet 归一化
++
++**配置参数**：
++```python
++InferenceEngine(
++    checkpoint="Being-H05/checkpoints/.../0010000",  # 模型权重
++    data_config_name="koch_follower",                 # 数据配置
++    dataset_name="koch_posttrain",                    # 元数据组
++    embodiment_tag="koch",                            # 机器人实施例
++    instruction="pick the orange toy...",             # 任务指令
++    device="cuda",                                    # 推理设备
++    enable_rtc=False,                                 # 服务器端禁用 RTC（客户端处理）
++    metadata_variant=None,                            # 归一化统计量变体
++)
++```
++
++#### server/udp_sender.py — 动作发送模块
++
++**核心类**：`ActionSender`
++
++**设计原则**：与客户端 `client/udp_sender.py` 保持一致的接口。
++
++| 方法 | 功能 |
++|------|------|
++| `send(data: bytes)` | 发送原始字节到 192.168.2.5:5000 |
++| `send_json(obj)` | `json.dumps` → UTF-8 编码 → `send()` |
++
++**JSON 格式**（与 §2.2 规范一致）：
++```json
++{
++    "sequence_id": 42,
++    "chunk_size": 16,
++    "inference_time_ms": 85.3,
++    "action": {
++        "arm_joint_position": [[f32×5] ×16],
++        "gripper_position":    [[f32×1] ×16]
++    }
++}
++```
++
++#### server/server_main.py — 主入口
++
++**核心类**：`InferenceServer`
++
++**主循环流程**：
++```
++while running:
++    1. DualReceiver.recv_both()       → 取双路最新帧
++    2. if 两帧均非空:
++         InferenceEngine.infer()      → 推理
++         ActionSender.send_json()     → 发送动作
++         sequence_id++
++    3. sleep(剩余时间)                  → 保持目标推理速率（默认 ~15Hz）
++```
++
++**启动流程**：
++1. 初始化 DualReceiver（bind :5002, :5003）
++2. 初始化 InferenceEngine（加载 Being-H05 模型，~22s）
++3. 初始化 ActionSender
++4. 等待双路视频流就绪（最长等待 30s）
++5. 进入主循环
++
++**优雅退出**：注册 SIGINT/SIGTERM 信号处理器，确保断开所有 socket 和设备。
++
++**CLI 参数**：
++
++| 参数 | 默认值 | 说明 |
++|------|--------|------|
++| `--checkpoint` | `Being-H05/checkpoints/.../0010000` | 模型权重路径 |
++| `--top-port` | `5002` | 顶部相机 UDP 端口 |
++| `--wrist-port` | `5003` | 腕部相机 UDP 端口 |
++| `--receiver-timeout-ms` | `5` | UDP 接收超时 |
++| `--action-host` | `192.168.2.5` | 动作发送目标 IP |
++| `--action-port` | `5000` | 动作发送目标端口 |
++| `--inference-interval-ms` | `66` (~15Hz) | 推理节拍间隔 |
++| `--task` | `"pick the orange toy..."` | 任务指令 |
++| `--device` | `cuda` | 推理设备 |
++| `--enable-rtc` | `False` | 启用 RTC prefix locking |
++| `--metadata-variant` | `None` (自动) | 归一化统计量变体 |
++| `--log-level` | `INFO` | 日志级别 |
++
++### 状态管理流程
++
++```
++  ┌─────────────────────────────────────────────────────────┐
++  │               State Estimation Loop                      │
++  │                                                          │
++  │  启动时:                                                 │
++  │    metadata.json → mean values → state_6d (初始)         │
++  │                                                          │
++  │  每帧推理:                                               │
++  │    Observation {                                         │
++  │      video (2 cameras)      ← UDP 接收                   │
++  │      state (current estimate) ← self._state_6d           │
++  │      instruction             ← 固定任务指令               │
++  │    }                                                     │
++  │    → BeingHPolicy.get_action()                           │
++  │    → arm_joint[16,5], gripper[16,1]                     │
++  │    → state_6d = [arm_joint[0], gripper[0]]  (第一步预测) │
++  │    → 发送全 16 步到客户端                                 │
++  └─────────────────────────────────────────────────────────┘
++```
++
++### 与客户端的对端通信
++
++```
++客户端 (192.168.2.5)                    服务端 (192.168.2.12)
++─────────────────────                   ─────────────────────
++CameraStreamer                           DualReceiver
++  top camera ──JPEG/UDP──→ :5002 ──→ FrameReceiver
++  wrist camera ─JPEG/UDP──→ :5003 ──→ FrameReceiver
++                                              │
++UdpReceiver ←──JSON/UDP── :5000 ←── ActionSender
++  ↓                                          
++RobotExecutor                                
++  set_arm_angles()                            
++```
+ 
+ ## 参考文件
+ 
+@@ -94,3 +340,12 @@ action.gripper_position	float[16][1]	16步×1夹爪 [0,100]
+   - client/udp_receiver.py       — UDP 接收模式：非阻塞 recvfrom
+   - client/action_replay.py      — 动作数据格式参考（action.json 解析）
+   - client/robot_executor.py     — 动作执行格式参考（如何将 JSON 转为电机指令）
++
++服务端实现文件：
++  - server/__init__.py           — 包入口
++  - server/udp_receiver.py       — UDP 视频流接收（FrameReceiver + DualReceiver）
++  - server/inference_engine.py   — Being-H05 推理引擎（模型加载 + infer + 状态估计）
++  - server/udp_sender.py         — UDP 动作 JSON 发送（ActionSender）
++  - server/server_main.py        — 主入口（InferenceServer 主循环）
++
++

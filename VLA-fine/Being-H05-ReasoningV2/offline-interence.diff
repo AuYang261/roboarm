@@ -1,0 +1,2526 @@
+commit 05bfeeb0141436fca7514a3940adbb565d3e8c08
+Author: hyl <172@qq.com>
+Date:   Sun Jun 14 15:59:45 2026 +0800
+
+    offline inference
+
+diff --git a/.gitignore b/.gitignore
+index 3f22388..9414eb3 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -1,4 +1,5 @@
+-
++output/
++client/
+ lerobot_v30_to_v21-main/
+ Being-H05-old/
+ flash-attention/
+diff --git a/Being-H05/configs/data_config.py b/Being-H05/configs/data_config.py
+index 4b11c7d..626a709 100644
+--- a/Being-H05/configs/data_config.py
++++ b/Being-H05/configs/data_config.py
+@@ -286,6 +286,8 @@ class KochFollowerDataConfig(BaseDataConfig):
+         'video.above': 'observation.images.above',
+         'video.wrist': 'observation.images.wrist',
+     }
++    LANGUAGE_KEYS = ['language.instruction']
++
+     STATE_KEYS = ['state.arm_joint_position', 'state.gripper_position']
+     ACTION_KEYS = ['action.arm_joint_position', 'action.gripper_position']
+ 
+diff --git a/Being-H05/scripts/inference/lerobot_record_vla.py b/Being-H05/scripts/inference/lerobot_record_vla.py
+new file mode 100644
+index 0000000..985934e
+--- /dev/null
++++ b/Being-H05/scripts/inference/lerobot_record_vla.py
+@@ -0,0 +1,780 @@
++#!/usr/bin/env python3
++"""
++lerobot-record  --robot.type=koch_follower  --robot.port=COM3  --robot.id=my_awesome_follower_arm \
++    --robot.cameras="{ front: {type: opencv, index_or_path: 2, width: 640, height: 480, fps: 30}, wrist: {type: opencv, index_or_path: 3, width: 640, height: 480, fps: 30}}" \
++    --display_data=true --dataset.repo_id=a/b --dataset.root='d:/dataset/test' \
++    --dataset.single_task="pick the green toy and place into box" \
++    --policy.pretrained_path='C:/Users/admin/Desktop/smolvla' --policy.type=smolvla \
++    --policy.vlm_model_name='./smolvlm2_500m' --policy.device='cuda'
++
++
++VLA-adapted record script for Being-H05 Koch follower arm.
++
++This script extends LeRobot's ``lerobot_record.py`` to support autonomous
++VLA inference (Being-H05) instead of human teleoperation.
++
++Two operation modes:
++    1. **VLA mode** (--vla.model_path set): Uses Being-H05 VLA for autonomous
++       action generation. No teleoperator needed.
++    2. **Teleop mode** (--teleop.type set): Standard human teleoperation
++       recording. Same as original lerobot_record.py.
++
++
++=== VLA Mode Usage Examples ===
++
++Minimal (VLA-only, no recording):
++    python lerobot_record_vla.py \\
++        --robot.type=koch_follower \\
++        --robot.port=/dev/ttyUSB0 \\
++        --robot.cameras="{above: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}, wrist: {type: opencv, index_or_path: 1, width: 640, height: 480, fps: 30}}" \\
++        --vla.model_path=/path/to/Being-H05/checkpoints/step-10000 \\
++        --vla.single_task="pick up the orange block" \\
++        --control.fps=20 \\
++        --control.num_steps=200
++
++VLA + recording to LeRobot dataset:
++    python lerobot_record_vla.py \\
++        --robot.type=koch_follower \\
++        --robot.port=/dev/ttyUSB0 \\
++        --robot.cameras="{above: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}, wrist: {type: opencv, index_or_path: 1, width: 640, height: 480, fps: 30}}" \\
++        --vla.model_path=/path/to/Being-H05/checkpoints/step-10000 \\
++        --vla.single_task="pick up the orange block" \\
++        --vla.num_inference_timesteps=4 \\
++        --control.fps=20 \\
++        --dataset.repo_id=my_user/koch_vla_eval \\
++        --dataset.num_episodes=5 \\
++        --dataset.single_task="pick up the orange block" \\
++        --display_data=true
++
++VLA with custom camera keys:
++    python lerobot_record_vla.py \\
++        --robot.type=koch_follower \\
++        --robot.port=/dev/ttyUSB0 \\
++        --robot.cameras="{laptop: {type: opencv, index_or_path: 0, ...}, phone: {type: opencv, index_or_path: 1, ...}}" \\
++        --vla.model_path=/path/to/checkpoint \\
++        --vla.camera_above_key=laptop \\
++        --vla.camera_wrist_key=phone \\
++        --vla.single_task="pick up the orange block"
++
++
++=== Data Flow (VLA Mode) ===
++
++       [ Cameras: above + wrist ]
++       [ Motors: 6x Dynamixel  ]
++                │
++                ▼
++       [ robot.get_observation() ]
++                │
++                ▼
++       [ obs → Being-H05 format ]  ───  raw_obs_to_beingh_obs()
++                │
++                ▼
++       [ BeingHPolicy.get_action() ]  ───  Flow Matching ODE (4 steps)
++                │                                         │
++                │                              ViT encodes 2 images
++                │                              LLM + Action Expert predicts
++                │                              16-step action chunk
++                │
++                ▼
++       [ Being-H05 output → robot action ]
++                │
++                ▼
++       [ robot.send_action() ]  ───  Execute first action
++                │
++                ▼
++       [ Optionally record to LeRobot dataset ]
++"""
++
++import logging
++import sys
++import time
++from dataclasses import dataclass, field
++from pathlib import Path
++from pprint import pformat
++from typing import Any
++
++import numpy as np
++
++from lerobot.cameras import CameraConfig  # noqa: F401
++from lerobot.cameras.opencv import OpenCVCameraConfig  # noqa: F401
++from lerobot.common.control_utils import (
++    init_keyboard_listener,
++    is_headless,
++    sanity_check_dataset_robot_compatibility,
++)
++from lerobot.configs import parser
++from lerobot.configs.dataset import DatasetRecordConfig
++from lerobot.datasets import (
++    LeRobotDataset,
++    VideoEncodingManager,
++    aggregate_pipeline_dataset_features,
++    create_initial_features,
++    safe_stop_image_writer,
++)
++from lerobot.processor import (
++    RobotAction,
++    RobotObservation,
++    RobotProcessorPipeline,
++    make_default_processors,
++)
++from lerobot.robots import (  # noqa: F401
++    Robot,
++    RobotConfig,
++    koch_follower,
++    make_robot_from_config,
++)
++from lerobot.teleoperators import (  # noqa: F401
++    Teleoperator,
++    TeleoperatorConfig,
++    koch_leader,
++    make_teleoperator_from_config,
++)
++from lerobot.utils.constants import ACTION, OBS_STR
++from lerobot.utils.feature_utils import build_dataset_frame, combine_feature_dicts
++from lerobot.utils.robot_utils import precise_sleep
++from lerobot.utils.utils import init_logging, log_say
++from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
++
++
++# ==============================================================================
++# VLA Configuration
++# ==============================================================================
++
++@dataclass
++class VLAPolicyConfig:
++    """Configuration for Being-H05 VLA policy inference."""
++
++    # Path to Being-H05 checkpoint directory
++    model_path: str | None = field(
++        default=None,
++        metadata={"help": "Path to Being-H05 checkpoint (containing config.json + safetensors)"},
++    )
++
++    # Being-H05 data config name
++    data_config_name: str = field(
++        default="koch_follower",
++        metadata={"help": "Being-H05 data config name"},
++    )
++
++    # Dataset name for loading normalization metadata
++    dataset_name: str = field(
++        default="koch_posttrain",
++        metadata={"help": "Dataset group name for metadata"},
++    )
++
++    # Robot embodiment tag
++    embodiment_tag: str = field(
++        default="koch",
++        metadata={"help": "Robot embodiment identifier"},
++    )
++
++    # Camera key mapping: LeRobot camera name → Being-H05 video key
++    camera_above_key: str = field(
++        default="above",
++        metadata={"help": "LeRobot camera key for the overhead view (→ video.above)"},
++    )
++    camera_wrist_key: str = field(
++        default="wrist",
++        metadata={"help": "LeRobot camera key for the wrist view (→ video.wrist)"},
++    )
++
++    # Task description
++    single_task: str = field(
++        default="pick up the object",
++        metadata={"help": "Task instruction for VLA inference"},
++    )
++
++    # Instruction template with {task_description} and {k} placeholders
++    instruction_template: str = field(
++        default=(
++            "According to the instruction '{task_description}', "
++            "what's the micro-step actions in the next {k} steps?"
++        ),
++        metadata={"help": "Prompt template for task instruction"},
++    )
++
++    # Flow matching parameters
++    num_inference_timesteps: int | None = field(
++        default=None,
++        metadata={"help": "Override flow matching ODE steps (default from checkpoint)"},
++    )
++
++    # RTC (Real-Time Chunking) settings
++    use_rtc: bool = field(
++        default=True,
++        metadata={"help": "Enable Real-Time Chunking with prefix locking"},
++    )
++    action_chunk_length: int = field(
++        default=16,
++        metadata={"help": "Number of action steps per chunk (must match model config)"},
++    )
++    n_action_steps: int = field(
++        default=4,
++        metadata={"help": "Number of steps to execute from each chunk before re-inference"},
++    )
++
++    # Device
++    device: str = field(
++        default="cuda" if __import__("torch").cuda.is_available() else "cpu",
++        metadata={"help": "Device for VLA inference"},
++    )
++
++
++# ==============================================================================
++# Top-level Config
++# ==============================================================================
++
++@dataclass
++class VLARecordConfig:
++    robot: RobotConfig
++    # VLA policy config (if set, uses VLA instead of teleop)
++    vla: VLAPolicyConfig = field(default_factory=VLAPolicyConfig)
++    # Dataset recording config (optional — if not set, no recording)
++    dataset: DatasetRecordConfig | None = None
++    # Teleoperator (only used in teleop mode, ignored in VLA mode)
++    teleop: TeleoperatorConfig | None = None
++    # Control settings
++    control: "ControlConfig" = field(default_factory=lambda: ControlConfig())
++    # Display
++    display_data: bool = False
++    display_ip: str | None = None
++    display_port: int | None = None
++    display_compressed_images: bool = False
++    play_sounds: bool = True
++
++    def __post_init__(self):
++        is_vla_mode = self.vla.model_path is not None
++        is_teleop_mode = self.teleop is not None
++
++        if not is_vla_mode and not is_teleop_mode:
++            raise ValueError(
++                "Either --vla.model_path (VLA mode) or --teleop.type (teleop mode) must be set. "
++                "For VLA mode: --vla.model_path=/path/to/Being-H05/checkpoint "
++                "For teleop mode: --teleop.type=koch_leader"
++            )
++
++        if is_vla_mode and is_teleop_mode:
++            logging.warning(
++                "Both VLA and teleop configured. Using VLA mode (teleop will be ignored)."
++            )
++
++        if is_vla_mode and self.dataset is not None:
++            repo_name = self.dataset.repo_id.split("/", 1)[-1]
++            if repo_name.startswith("eval_"):
++                raise ValueError(
++                    "Dataset names starting with 'eval_' are reserved. "
++                    "Use a different name for VLA-recorded datasets."
++                )
++
++
++@dataclass
++class ControlConfig:
++    """Control loop settings."""
++    fps: int = 20
++    num_steps: int = 200
++    episode_time_s: int | None = None  # Alternative to num_steps
++    reset_time_s: float = 2.0
++
++
++# ==============================================================================
++# Observation/Action format conversion
++# ==============================================================================
++
++# Koch motor names in LeRobot (order must match Being-H05's arm_joint + gripper)
++KOCH_MOTOR_NAMES = [
++    "shoulder_pan",
++    "shoulder_lift",
++    "elbow_flex",
++    "wrist_flex",
++    "wrist_roll",
++    "gripper",
++]
++KOCH_MOTOR_KEYS = [f"{name}.pos" for name in KOCH_MOTOR_NAMES]
++
++
++def robot_obs_to_beingh_obs(
++    raw_obs: RobotObservation,
++    config: VLAPolicyConfig,
++) -> dict[str, Any]:
++    """
++    Convert LeRobot KochFollower RobotObservation to Being-H05 BeingHPolicy format.
++
++    LeRobot RobotObservation (flat dict):
++        {
++            "shoulder_pan.pos": 1.23,
++            "shoulder_lift.pos": 0.45,
++            "elbow_flex.pos": -0.67,
++            "wrist_flex.pos": 1.89,
++            "wrist_roll.pos": 0.12,
++            "gripper.pos": 50.0,
++            "above": np.ndarray(H, W, 3),   # camera name from robot config
++            "wrist": np.ndarray(H, W, 3),
++        }
++
++    Being-H05 BeingHPolicy format:
++        {
++            "video.above": np.ndarray(H, W, 3) uint8,
++            "video.wrist": np.ndarray(H, W, 3) uint8,
++            "state.arm_joint_position": np.ndarray(5,) float32,
++            "state.gripper_position": np.ndarray(1,) float32,
++            "language.instruction": ["task description"],
++        }
++    """
++    # Extract motor states in fixed order
++    state_array = np.array(
++        [float(raw_obs[k]) for k in KOCH_MOTOR_KEYS],
++        dtype=np.float32,
++    )
++
++    # Extract camera images
++    above_img = _extract_image(raw_obs, config.camera_above_key, "above")
++    wrist_img = _extract_image(raw_obs, config.camera_wrist_key, "wrist")
++
++    return {
++        "video.above": above_img,
++        "video.wrist": wrist_img,
++        "state.arm_joint_position": state_array[:5].copy(),
++        "state.gripper_position": state_array[5:6].copy(),
++        "language.instruction": [config.single_task],
++    }
++
++
++def beingh_result_to_robot_action(
++    result: dict[str, Any],
++    step_index: int = 0,
++) -> RobotAction:
++    """
++    Convert Being-H05 action result to LeRobot KochFollower RobotAction format.
++
++    Being-H05 output:
++        {
++            "action.arm_joint_position": [[...] * 16],   # (16, 5)
++            "action.gripper_position":    [[...] * 16],   # (16, 1)
++            "action_unified":             [[...] * 16],   # (16, 200) optional
++        }
++
++    LeRobot RobotAction (flat dict for KochFollower.send_action()):
++        {
++            "shoulder_pan.pos": 1.23,
++            "shoulder_lift.pos": 0.45,
++            "elbow_flex.pos": -0.67,
++            "wrist_flex.pos": 1.89,
++            "wrist_roll.pos": 0.12,
++            "gripper.pos": 50.0,
++        }
++    """
++    arm_actions = np.array(result["action.arm_joint_position"], dtype=np.float64)
++    gripper_actions = np.array(result["action.gripper_position"], dtype=np.float64)
++
++    # Extract the specified step
++    if arm_actions.ndim == 2:
++        arm_step = arm_actions[step_index]   # (5,)
++    else:
++        arm_step = arm_actions
++
++    if gripper_actions.ndim == 2:
++        grip_step = gripper_actions[step_index]  # (1,)
++    else:
++        grip_step = gripper_actions
++
++    # Build flat dict matching Koch motor names
++    action_dict: RobotAction = {}
++    for i, motor_key in enumerate(KOCH_MOTOR_KEYS[:5]):
++        action_dict[motor_key] = float(arm_step[i])
++    action_dict[KOCH_MOTOR_KEYS[5]] = float(grip_step.item() if hasattr(grip_step, 'item') else grip_step)
++
++    return action_dict
++
++
++def _extract_image(raw_obs: dict, camera_key: str, fallback_key: str) -> np.ndarray:
++    """Extract RGB image from raw robot observation dict."""
++    for key in [camera_key, fallback_key]:
++        if key in raw_obs:
++            img = raw_obs[key]
++            break
++    else:
++        raise KeyError(
++            f"Cannot find camera '{camera_key}' or '{fallback_key}' "
++            f"in observation. Available keys: {list(raw_obs.keys())}"
++        )
++
++    img = np.asarray(img)
++    if img.dtype != np.uint8:
++        if img.max() <= 1.0:
++            img = (img * 255).astype(np.uint8)
++        else:
++            img = img.astype(np.uint8)
++    return img
++
++
++# ==============================================================================
++# VLA Record Loop
++# ==============================================================================
++
++@safe_stop_image_writer
++def vla_record_loop(
++    robot: Robot,
++    vlapolicy: Any,  # BeingHPolicy instance
++    events: dict,
++    fps: int,
++    robot_action_processor: RobotProcessorPipeline,
++    robot_observation_processor: RobotProcessorPipeline,
++    vla_config: VLAPolicyConfig,
++    dataset: LeRobotDataset | None = None,
++    control_time_s: int | None = None,
++    single_task: str | None = None,
++    display_data: bool = False,
++    display_compressed_images: bool = False,
++):
++    """
++    Main control loop: robot observation → VLA inference → robot action → (record).
++
++    Data flow:
++        robot.get_observation()            → raw_obs
++        robot_observation_processor(obs)   → processed_obs
++        robot_obs_to_beingh_obs(obs, cfg)  → beingh_obs
++        vlapolicy.get_action(beingh_obs)   → vla_result
++        beingh_result_to_robot_action()    → robot_action
++        robot_action_processor(action)     → action_to_send
++        robot.send_action(action_to_send)  → execute
++        dataset.add_frame(frame)           → record (optional)
++
++    RTC mode (use_rtc=True):
++        - Model predicts 16-step chunk
++        - Execute n_action_steps (default 4)
++        - Re-query model with prev_chunk for prefix locking
++        - Repeat
++    """
++    if dataset is not None and dataset.fps != fps:
++        raise ValueError(
++            f"Dataset fps ({dataset.fps}) must match control fps ({fps})."
++        )
++
++    control_interval = 1.0 / fps
++    num_action_steps = vla_config.n_action_steps
++    use_rtc = vla_config.use_rtc
++
++    # RTC state
++    prev_chunk = None
++    action_buffer: list[RobotAction] = []
++    chunk_step = 0
++
++    timestamp = 0.0
++    start_episode_t = time.perf_counter()
++
++    while True:
++        # Check termination
++        if control_time_s is not None and timestamp >= control_time_s:
++            break
++        if events.get("exit_early", False):
++            events["exit_early"] = False
++            break
++
++        start_loop_t = time.perf_counter()
++
++        # Step 1: Get robot observation
++        raw_obs = robot.get_observation()
++        processed_obs = robot_observation_processor(raw_obs)
++
++        # Build dataset observation frame (if recording)
++        if dataset is not None:
++            observation_frame = build_dataset_frame(
++                dataset.features, processed_obs, prefix=OBS_STR
++            )
++
++        # Step 2: Get action (from VLA or from buffer)
++        if len(action_buffer) == 0:
++            # Convert to Being-H05 format
++            beingh_obs = robot_obs_to_beingh_obs(raw_obs, vla_config)
++
++            # RTC: pass previous chunk for prefix locking
++            if use_rtc and prev_chunk is not None:
++                beingh_obs["prev_chunk"] = prev_chunk
++                beingh_obs["inference_delay"] = num_action_steps
++
++            # VLA inference
++            result = vlapolicy.get_action(beingh_obs)
++
++            # Cache unified actions for next RTC query
++            if use_rtc:
++                prev_chunk = result.get("action_unified")
++
++            # Build action buffer from result
++            action_buffer = []
++            chunk_len = len(result["action.arm_joint_position"])
++            for i in range(chunk_len):
++                action_buffer.append(
++                    beingh_result_to_robot_action(result, step_index=i)
++                )
++            chunk_step = 0
++
++        # Pop action from buffer
++        raw_vla_action = action_buffer.pop(0)
++        chunk_step += 1
++
++        # Step 3: Process action through robot action processor
++        robot_action_to_send = robot_action_processor((raw_vla_action, processed_obs))
++
++        # Step 4: Send action to robot
++        robot.send_action(robot_action_to_send)
++
++        # Step 5: Record to dataset (if enabled)
++        if dataset is not None:
++            raw_vla_action_for_dataset = raw_vla_action.copy()
++            action_frame = build_dataset_frame(
++                dataset.features, raw_vla_action_for_dataset, prefix=ACTION
++            )
++            frame = {**observation_frame, **action_frame, "task": single_task}
++            dataset.add_frame(frame)
++
++        # Step 6: Display (if enabled)
++        if display_data:
++            log_rerun_data(
++                observation=processed_obs,
++                action=raw_vla_action,
++                compress_images=display_compressed_images,
++            )
++
++        # Step 7: Timing
++        dt_s = time.perf_counter() - start_loop_t
++        sleep_time_s = control_interval - dt_s
++        if sleep_time_s < 0:
++            logging.warning(
++                f"Control loop running slow ({1.0 / dt_s:.1f} Hz vs target {fps} Hz). "
++                f"VLA inference may be the bottleneck."
++            )
++        precise_sleep(max(sleep_time_s, 0.0))
++
++        timestamp = time.perf_counter() - start_episode_t
++
++
++# ==============================================================================
++# Main entry point
++# ==============================================================================
++
++@parser.wrap()
++def record_vla(
++    cfg: VLARecordConfig,
++    robot_action_processor: RobotProcessorPipeline | None = None,
++    robot_observation_processor: RobotProcessorPipeline | None = None,
++) -> LeRobotDataset | None:
++    """Main entry point for VLA-adapted recording / inference."""
++    init_logging()
++    logging.info(pformat({
++        "robot_type": cfg.robot.type if hasattr(cfg.robot, 'type') else str(cfg.robot),
++        "vla_model_path": cfg.vla.model_path,
++        "vla_task": cfg.vla.single_task,
++        "control_fps": cfg.control.fps,
++        "dataset": cfg.dataset.repo_id if cfg.dataset else None,
++    }))
++
++    if cfg.display_data:
++        init_rerun(session_name="vla_recording", ip=cfg.display_ip, port=cfg.display_port)
++
++    display_compressed = (
++        True
++        if (cfg.display_data and cfg.display_ip is not None and cfg.display_port is not None)
++        else cfg.display_compressed_images
++    )
++
++    is_vla_mode = cfg.vla.model_path is not None
++
++    # ============================================================
++    # Initialize robot
++    # ============================================================
++    robot = make_robot_from_config(cfg.robot)
++    logging.info(f"Robot: {robot.name}")
++
++    # ============================================================
++    # Initialize VLA policy (VLA mode)
++    # ============================================================
++    vlapolicy = None
++    if is_vla_mode:
++        logging.info(f"Loading Being-H05 VLA policy from {cfg.vla.model_path}")
++
++        # Setup beingh import path
++        beingh_checkpoint = Path(cfg.vla.model_path).resolve()
++        beingh_root = beingh_checkpoint.parent.parent
++        if str(beingh_root) not in sys.path:
++            sys.path.insert(0, str(beingh_root))
++
++        from BeingH.inference.beingh_policy import BeingHPolicy
++
++        vlapolicy = BeingHPolicy(
++            model_path=str(beingh_checkpoint),
++            data_config_name=cfg.vla.data_config_name,
++            dataset_name=cfg.vla.dataset_name,
++            embodiment_tag=cfg.vla.embodiment_tag,
++            instruction_template=cfg.vla.instruction_template,
++            max_view_num=-1,
++            use_fixed_view=False,
++            action_attn_mode="causal",
++            device=cfg.vla.device,
++            enable_rtc=cfg.vla.use_rtc,
++            num_inference_timesteps=cfg.vla.num_inference_timesteps,
++        )
++        logging.info("Being-H05 VLA policy loaded ✓")
++
++    # ============================================================
++    # Initialize teleop (teleop mode)
++    # ============================================================
++    teleop = None
++    if not is_vla_mode and cfg.teleop is not None:
++        teleop = make_teleoperator_from_config(cfg.teleop)
++        logging.info(f"Teleoperator: {teleop.name if hasattr(teleop, 'name') else cfg.teleop.type}")
++
++    # ============================================================
++    # Setup processors
++    # ============================================================
++    if robot_action_processor is None or robot_observation_processor is None:
++        _, default_robot_ap, default_robot_op = make_default_processors()
++        robot_action_processor = robot_action_processor or default_robot_ap
++        robot_observation_processor = robot_observation_processor or default_robot_op
++
++    # ============================================================
++    # Setup dataset (optional)
++    # ============================================================
++    dataset = None
++    if cfg.dataset is not None and cfg.dataset.repo_id is not None:
++        # Determine dataset features from robot
++        dataset_features = combine_feature_dicts(
++            aggregate_pipeline_dataset_features(
++                pipeline=robot_observation_processor,
++                initial_features=create_initial_features(
++                    observation=robot.observation_features
++                ),
++                use_videos=cfg.dataset.video,
++            ),
++            # Action features also from robot (same structure)
++            aggregate_pipeline_dataset_features(
++                pipeline=robot_observation_processor,
++                initial_features=create_initial_features(
++                    observation=robot.action_features
++                ),
++                use_videos=False,
++            ),
++        )
++
++        num_cameras = len(robot.cameras) if hasattr(robot, "cameras") else 0
++
++        dataset = LeRobotDataset.create(
++            cfg.dataset.repo_id,
++            cfg.dataset.fps,
++            root=cfg.dataset.root,
++            robot_type=robot.name,
++            features=dataset_features,
++            use_videos=cfg.dataset.video,
++            image_writer_processes=cfg.dataset.num_image_writer_processes,
++            image_writer_threads=(
++                cfg.dataset.num_image_writer_threads_per_camera * num_cameras
++                if num_cameras > 0 else 0
++            ),
++            batch_encoding_size=cfg.dataset.video_encoding_batch_size,
++            camera_encoder=cfg.dataset.camera_encoder,
++            encoder_threads=cfg.dataset.encoder_threads,
++            streaming_encoding=cfg.dataset.streaming_encoding,
++            encoder_queue_maxsize=cfg.dataset.encoder_queue_maxsize,
++        )
++        logging.info(f"Dataset created: {cfg.dataset.repo_id}")
++
++    # ============================================================
++    # Run control loop
++    # ============================================================
++    listener = None
++    events = {}
++
++    try:
++        robot.connect()
++        if teleop is not None:
++            teleop.connect()
++
++        listener, events = init_keyboard_listener()
++
++        # Determine control time
++        if cfg.control.episode_time_s is not None:
++            control_time_s = cfg.control.episode_time_s
++        else:
++            control_time_s = cfg.control.num_steps / cfg.control.fps
++
++        num_episodes = cfg.dataset.num_episodes if cfg.dataset else 1
++        recorded_episodes = 0
++
++        with VideoEncodingManager(dataset) if dataset else __import__('contextlib').nullcontext():
++            while recorded_episodes < num_episodes and not events.get("stop_recording", False):
++                mode_str = "VLA" if is_vla_mode else "teleop"
++                log_say(f"[{mode_str}] Episode {recorded_episodes + 1}/{num_episodes}", cfg.play_sounds)
++
++                if is_vla_mode:
++                    vla_record_loop(
++                        robot=robot,
++                        vlapolicy=vlapolicy,
++                        events=events,
++                        fps=cfg.control.fps,
++                        robot_action_processor=robot_action_processor,
++                        robot_observation_processor=robot_observation_processor,
++                        vla_config=cfg.vla,
++                        dataset=dataset,
++                        control_time_s=control_time_s,
++                        single_task=cfg.vla.single_task,
++                        display_data=cfg.display_data,
++                        display_compressed_images=display_compressed,
++                    )
++                else:
++                    # Fallback to original lerobot_record loop (teleop mode)
++                    from lerobot.scripts.lerobot_record import record_loop
++                    record_loop(
++                        robot=robot,
++                        events=events,
++                        fps=cfg.control.fps,
++                        teleop_action_processor=robot_action_processor,
++                        robot_action_processor=robot_action_processor,
++                        robot_observation_processor=robot_observation_processor,
++                        teleop=teleop,
++                        dataset=dataset,
++                        control_time_s=control_time_s,
++                        single_task=cfg.dataset.single_task if cfg.dataset else None,
++                        display_data=cfg.display_data,
++                        display_compressed_images=display_compressed,
++                    )
++
++                # Reset between episodes
++                if not events.get("stop_recording", False) and recorded_episodes < num_episodes - 1:
++                    log_say("Reset the environment", cfg.play_sounds)
++                    time.sleep(cfg.control.reset_time_s)
++
++                if dataset is not None:
++                    dataset.save_episode()
++                recorded_episodes += 1
++
++    except KeyboardInterrupt:
++        logging.info("Interrupted by user")
++    finally:
++        log_say("Stopping", cfg.play_sounds, blocking=True)
++
++        if dataset is not None:
++            dataset.finalize()
++        if robot.is_connected:
++            robot.disconnect()
++        if teleop is not None and teleop.is_connected:
++            teleop.disconnect()
++        if not is_headless() and listener is not None:
++            listener.stop()
++
++        # Push to hub if configured
++        if cfg.dataset is not None and cfg.dataset.push_to_hub:
++            if dataset is not None and dataset.num_episodes > 0:
++                dataset.push_to_hub(tags=cfg.dataset.tags, private=cfg.dataset.private)
++            else:
++                logging.warning("No episodes saved — skipping push to hub")
++
++        log_say("Exiting", cfg.play_sounds)
++
++    return dataset
++
++
++def main():
++    record_vla()
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/Being-H05/scripts/inference/offline_inference.py b/Being-H05/scripts/inference/offline_inference.py
+new file mode 100644
+index 0000000..301e89c
+--- /dev/null
++++ b/Being-H05/scripts/inference/offline_inference.py
+@@ -0,0 +1,929 @@
++#!/usr/bin/env python3
++"""
++离线视频推理脚本 - Being-H05 VLA Model
++
++从 LeRobot v2.1 格式数据集读取视频流和状态数据，
++使用 Being-H05 模型进行离线动作推理，保存推理结果。
++
++两种推理模式:
++    1. single_frame: 单帧独立推理（Open-Loop），从每帧独立预测16步动作
++    2. rtc_rollout: 滚动推理（Closed-Loop with RTC），模拟真实部署场景
++
++Usage:
++    # 单帧推理
++    python offline_inference.py \
++        --data_path origin_data_v21/koch_follower/pick_orange_simple_shape \
++        --checkpoint Being-H05/checkpoints/koch_all_data_20260603_214251/0010000 \
++        --output_dir output/inference/pick_orange_simple_shape \
++        --mode single_frame
++
++    # RTC 滚动推理
++    python offline_inference.py \
++        --data_path origin_data_v21/koch_follower/pick_orange_simple_shape \
++        --checkpoint Being-H05/checkpoints/koch_all_data_20260603_214251/0010000 \
++        --output_dir output/inference/pick_orange_simple_shape \
++        --mode rtc_rollout \
++        --n_action_steps 4
++"""
++
++import argparse
++import json
++import logging
++import os
++import sys
++import time
++import traceback
++from pathlib import Path
++from typing import Any, Dict, List, Optional, Tuple
++
++import numpy as np
++import pandas as pd
++import torch
++from matplotlib import pyplot as plt
++
++# ==============================================================================
++# Path Setup
++# ==============================================================================
++# Add Being-H05 root to Python path for imports
++_script_dir = Path(__file__).resolve().parent
++_beingh_root = _script_dir.parent.parent  # Being-H05/
++if str(_beingh_root) not in sys.path:
++    sys.path.insert(0, str(_beingh_root))
++
++# Add project root to Python path (for lerobot, etc.)
++_project_root = _beingh_root.parent  # Being-H/
++if str(_project_root) not in sys.path:
++    sys.path.insert(0, str(_project_root))
++
++# ==============================================================================
++# Imports (deferred for clean error messages)
++# ==============================================================================
++
++try:
++    import decord
++    from decord import VideoReader
++    HAS_DECORD = True
++except ImportError:
++    HAS_DECORD = False
++    print("Warning: decord not installed. Install with: pip install decord")
++
++try:
++    from BeingH.inference.beingh_policy import BeingHPolicy
++except ImportError as e:
++    print(f"Error importing BeingHPolicy: {e}")
++    print("Make sure the script is run from the Being-H/ directory")
++    print(f"sys.path: {sys.path[:3]}...")
++    sys.exit(1)
++
++# ==============================================================================
++# Logging Setup
++# ==============================================================================
++
++logging.basicConfig(
++    level=logging.INFO,
++    format='%(asctime)s | %(levelname)-8s | %(message)s',
++    datefmt='%H:%M:%S',
++)
++logger = logging.getLogger(__name__)
++
++
++# ==============================================================================
++# Data Loading Utilities
++# ==============================================================================
++
++# Koch motor names (matching LeRobot v2.1 format)
++KOCH_MOTOR_NAMES = [
++    "shoulder_pan",
++    "shoulder_lift",
++    "elbow_flex",
++    "wrist_flex",
++    "wrist_roll",
++    "gripper",
++]
++
++
++def load_episode_parquet(data_dir: Path, episode_idx: int) -> pd.DataFrame:
++    """Load parquet data for a single episode."""
++    chunk_idx = episode_idx // 1000  # LeRobot chunks by 1000 episodes
++    parquet_path = data_dir / f"data/chunk-{chunk_idx:03d}/episode_{episode_idx:06d}.parquet"
++    if not parquet_path.exists():
++        raise FileNotFoundError(f"Parquet file not found: {parquet_path}")
++    return pd.read_parquet(parquet_path)
++
++
++def load_episode_video(videos_dir: Path, camera_key: str, episode_idx: int) -> np.ndarray:
++    """
++    Load all frames from an episode video.
++
++    Args:
++        videos_dir: Base videos directory
++        camera_key: e.g. 'observation.images.above' or 'observation.images.wrist'
++        episode_idx: Episode index
++
++    Returns:
++        Frames as numpy array of shape (N, H, W, C) in uint8 (RGB)
++    """
++    chunk_idx = episode_idx // 1000
++    video_path = videos_dir / f"chunk-{chunk_idx:03d}/{camera_key}/episode_{episode_idx:06d}.mp4"
++
++    if not video_path.exists():
++        raise FileNotFoundError(f"Video file not found: {video_path}")
++
++    if HAS_DECORD:
++        vr = VideoReader(str(video_path), num_threads=2)
++        frames = vr.get_batch(range(len(vr))).asnumpy()  # (N, H, W, C) uint8 RGB
++    else:
++        # Fallback to OpenCV
++        import cv2
++        cap = cv2.VideoCapture(str(video_path))
++        frames = []
++        while True:
++            ret, frame = cap.read()
++            if not ret:
++                break
++            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
++            frames.append(frame_rgb)
++        cap.release()
++        frames = np.array(frames)
++
++    return frames
++
++
++def load_task_instruction(meta_dir: Path) -> str:
++    """Load the task instruction from tasks.jsonl."""
++    tasks_path = meta_dir / "tasks.jsonl"
++    if tasks_path.exists():
++        with open(tasks_path, "r") as f:
++            tasks = [json.loads(line.strip()) for line in f if line.strip()]
++        if tasks:
++            return tasks[0].get("task", "pick up the object")
++    return "pick up the object"
++
++
++def load_dataset_info(meta_dir: Path) -> Dict[str, Any]:
++    """Load dataset info.json."""
++    info_path = meta_dir / "info.json"
++    with open(info_path, "r") as f:
++        return json.load(f)
++
++
++# ==============================================================================
++# Observation Builder
++# ==============================================================================
++
++def build_observation(
++    frame_above: np.ndarray,
++    frame_wrist: np.ndarray,
++    state_6d: np.ndarray,
++    instruction: str,
++) -> Dict[str, Any]:
++    """
++    Build Being-H05 format observation from raw data.
++
++    NOTE: State keys MUST come before video keys in the dict. BeingHPolicy's
++    _check_is_batched() inspects the first dict value — if it's a 3D image array,
++    it incorrectly assumes the observation is already batched and skips the
++    unsqueeze step, causing a shape mismatch downstream.
++
++    Args:
++        frame_above: Above camera frame (H, W, 3) uint8
++        frame_wrist: Wrist camera frame (H, W, 3) uint8
++        state_6d: State array (6,) float32 [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper]
++        instruction: Task description string
++
++    Returns:
++        Observation dict in BeingHPolicy format
++    """
++    return {
++        "state.arm_joint_position": state_6d[:5].copy().astype(np.float32),
++        "state.gripper_position": state_6d[5:6].copy().astype(np.float32),
++        "video.above": frame_above.astype(np.uint8),
++        "video.wrist": frame_wrist.astype(np.uint8),
++        "language.instruction": [instruction],
++    }
++
++
++# ==============================================================================
++# Inference Core
++# ==============================================================================
++
++def run_single_frame_inference(
++    policy: BeingHPolicy,
++    data_dir: Path,
++    videos_dir: Path,
++    episode_idx: int,
++    instruction: str,
++    output_dir: Path,
++    save_plots: bool = True,
++) -> Dict[str, Any]:
++    """
++    Run single-frame (open-loop) inference on an episode.
++
++    For each frame in the episode, run inference independently.
++    Compares predicted 16-step action chunks against ground truth.
++
++    Returns:
++        Dict with predictions, ground_truth, and error metrics
++    """
++    logger.info(f"[Episode {episode_idx}] Loading data...")
++
++    # Load parquet and video
++    df = load_episode_parquet(data_dir, episode_idx)
++    frames_above = load_episode_video(videos_dir, "observation.images.above", episode_idx)
++    frames_wrist = load_episode_video(videos_dir, "observation.images.wrist", episode_idx)
++
++    num_frames = len(df)
++    min_frames = min(num_frames, len(frames_above), len(frames_wrist))
++    logger.info(f"[Episode {episode_idx}] Frames: {min_frames} (parquet={num_frames}, above={len(frames_above)}, wrist={len(frames_wrist)})")
++
++    # Extract data arrays
++    states = np.stack(df['observation.state'].values[:min_frames])  # (N, 6)
++    actions_gt = np.stack(df['action'].values[:min_frames])          # (N, 6)
++
++    # Prepare output storage
++    action_chunk_length = policy.action_chunk_length  # 16
++    num_inference_frames = min_frames - action_chunk_length + 1  # Avoid going out of bounds
++
++    all_predictions = []  # (num_inference_frames, action_chunk_length, 6)
++    all_ground_truth = [] # (num_inference_frames, action_chunk_length, 6)
++    inference_times = []
++
++    logger.info(f"[Episode {episode_idx}] Running {num_inference_frames} inferences...")
++
++    for i in range(num_inference_frames):
++        # Build observation from current frame
++        obs = build_observation(
++            frames_above[i],
++            frames_wrist[i],
++            states[i],
++            instruction,
++        )
++
++        # Run inference
++        t_start = time.perf_counter()
++        try:
++            result = policy.get_action(obs)
++        except Exception as e:
++            logger.error(f"[Episode {episode_idx}] Inference failed at frame {i}: {e}")
++            raise
++        t_elapsed = time.perf_counter() - t_start
++        inference_times.append(t_elapsed)
++
++        # Extract predicted actions
++        pred_arm = np.array(result["action.arm_joint_position"])   # (16, 5)
++        pred_grip = np.array(result["action.gripper_position"])     # (16, 1)
++        pred_6d = np.concatenate([pred_arm, pred_grip], axis=-1)   # (16, 6)
++
++        # Extract ground truth actions (next action_chunk_length steps)
++        gt_6d = actions_gt[i:i + action_chunk_length]               # (16, 6)
++        # Pad if near the end
++        if gt_6d.shape[0] < action_chunk_length:
++            pad_len = action_chunk_length - gt_6d.shape[0]
++            gt_6d = np.concatenate([gt_6d, np.tile(gt_6d[-1:], (pad_len, 1))], axis=0)
++
++        all_predictions.append(pred_6d)
++        all_ground_truth.append(gt_6d)
++
++        if (i + 1) % 50 == 0 or i == 0:
++            mean_time = np.mean(inference_times)
++            logger.info(f"[Episode {episode_idx}] Progress: {i+1}/{num_inference_frames} | "
++                       f"Avg time: {mean_time:.3f}s/frame | "
++                       f"ETA: {mean_time * (num_inference_frames - i - 1):.0f}s")
++
++    # Stack results
++    predictions = np.stack(all_predictions, axis=0)     # (F, 16, 6)
++    ground_truth = np.stack(all_ground_truth, axis=0)   # (F, 16, 6)
++
++    # Compute errors
++    errors = compute_metrics(predictions, ground_truth)
++
++    # Log summary
++    logger.info(f"[Episode {episode_idx}] Complete: "
++               f"Avg inference time: {np.mean(inference_times):.4f}s ± {np.std(inference_times):.4f}s")
++    logger.info(f"[Episode {episode_idx}] MSE per joint: {errors['mse_per_joint'].tolist()}")
++    logger.info(f"[Episode {episode_idx}] Overall MSE: {errors['mse_overall']:.6f}, MAE: {errors['mae_overall']:.6f}")
++
++    # Save results
++    ep_output_dir = output_dir / f"episode_{episode_idx:06d}"
++    ep_output_dir.mkdir(parents=True, exist_ok=True)
++
++    np.savez_compressed(ep_output_dir / "predictions.npz", predictions=predictions)
++    np.savez_compressed(ep_output_dir / "ground_truth.npz", ground_truth=ground_truth)
++    np.savez_compressed(ep_output_dir / "errors.npz", **errors)
++
++    # Save inference log
++    log_data = {
++        "episode_idx": episode_idx,
++        "num_frames": min_frames,
++        "num_inferences": num_inference_frames,
++        "action_chunk_length": action_chunk_length,
++        "avg_inference_time_s": float(np.mean(inference_times)),
++        "std_inference_time_s": float(np.std(inference_times)),
++        "mse_overall": float(errors["mse_overall"]),
++        "mae_overall": float(errors["mae_overall"]),
++        "mse_per_joint": errors["mse_per_joint"].tolist(),
++        "mae_per_joint": errors["mae_per_joint"].tolist(),
++    }
++    with open(ep_output_dir / "inference_log.json", "w") as f:
++        json.dump(log_data, f, indent=2)
++
++    # Generate plots
++    if save_plots:
++        plot_action_curves(predictions, ground_truth, KOCH_MOTOR_NAMES, ep_output_dir, episode_idx)
++
++    return log_data
++
++
++def run_rtc_rollout_inference(
++    policy: BeingHPolicy,
++    data_dir: Path,
++    videos_dir: Path,
++    episode_idx: int,
++    instruction: str,
++    output_dir: Path,
++    n_action_steps: int = 4,
++    save_plots: bool = True,
++) -> Dict[str, Any]:
++    """
++    Run closed-loop RTC (Real-Time Chunking) rollout inference.
++
++    Simulates real deployment:
++    - Model predicts 16-step chunk
++    - Execute n_action_steps (e.g. 4) from chunk
++    - Re-query model with prev_chunk for prefix locking
++    - Continue until episode ends
++
++    Returns:
++        Dict with rollout results and metrics
++    """
++    logger.info(f"[Episode {episode_idx}] Loading data for RTC rollout...")
++
++    # Load data
++    df = load_episode_parquet(data_dir, episode_idx)
++    frames_above = load_episode_video(videos_dir, "observation.images.above", episode_idx)
++    frames_wrist = load_episode_video(videos_dir, "observation.images.wrist", episode_idx)
++
++    num_frames = len(df)
++    min_frames = min(num_frames, len(frames_above), len(frames_wrist))
++    states = np.stack(df['observation.state'].values[:min_frames])
++    actions_gt = np.stack(df['action'].values[:min_frames])
++
++    action_chunk_length = policy.action_chunk_length
++
++    # RTC state
++    prev_chunk = None
++    rollout_actions = []  # Stores predicted actions executed at each step
++    rollout_states = []   # States at each step
++    inference_times = []
++
++    step = 0
++    max_steps = min_frames - 1
++
++    logger.info(f"[Episode {episode_idx}] Starting RTC rollout: max_steps={max_steps}, "
++               f"chunk_length={action_chunk_length}, n_action_steps={n_action_steps}")
++
++    while step < max_steps:
++        # Build observation
++        obs = build_observation(
++            frames_above[step],
++            frames_wrist[step],
++            states[step],
++            instruction,
++        )
++
++        # RTC: pass previous chunk for prefix locking
++        if prev_chunk is not None:
++            obs["prev_chunk"] = prev_chunk
++            obs["inference_delay"] = n_action_steps
++
++        # Inference
++        t_start = time.perf_counter()
++        try:
++            result = policy.get_action(obs)
++        except Exception as e:
++            logger.error(f"[Episode {episode_idx}] RTC inference failed at step {step}: {e}")
++            logger.error(traceback.format_exc())
++            break
++        t_elapsed = time.perf_counter() - t_start
++        inference_times.append(t_elapsed)
++
++        # Get predicted actions
++        pred_arm = np.array(result["action.arm_joint_position"])   # (16, 5)
++        pred_grip = np.array(result["action.gripper_position"])     # (16, 1)
++        pred_6d = np.concatenate([pred_arm, pred_grip], axis=-1)   # (16, 6)
++
++        # Cache unified actions for next RTC query
++        if "action_unified" in result:
++            prev_chunk = np.array(result["action_unified"])  # (16, 200)
++
++        # Execute n_action_steps from this chunk
++        for chunk_step in range(min(n_action_steps, max_steps - step)):
++            rollout_actions.append(pred_6d[chunk_step])
++            rollout_states.append(states[step + chunk_step])
++            step += 1
++
++        if step < max_steps:
++            if len(inference_times) % 10 == 0:
++                logger.info(f"[Episode {episode_idx}] RTC Step {step}/{max_steps} | "
++                           f"Inferences: {len(inference_times)} | "
++                           f"Avg time: {np.mean(inference_times):.3f}s")
++
++    # Stack results
++    rollout_actions = np.stack(rollout_actions, axis=0)   # (T, 6)
++    rollout_states = np.stack(rollout_states, axis=0)     # (T, 6)
++
++    # Trim ground truth to match rollout length
++    rollout_len = len(rollout_actions)
++    gt_actions = actions_gt[:rollout_len]
++
++    # Compute errors
++    error_per_step = np.square(rollout_actions - gt_actions).mean(axis=-1)  # (T,)
++    mse_overall = np.mean(error_per_step)
++    mae_overall = np.mean(np.abs(rollout_actions - gt_actions))
++    mse_per_joint = np.square(rollout_actions - gt_actions).mean(axis=0)   # (6,)
++    mae_per_joint = np.abs(rollout_actions - gt_actions).mean(axis=0)      # (6,)
++
++    # Cumulative error
++    cum_error = np.cumsum(error_per_step) / (np.arange(rollout_len) + 1)
++
++    logger.info(f"[Episode {episode_idx}] RTC Rollout Complete: "
++               f"{len(inference_times)} inferences, {rollout_len} steps executed")
++    logger.info(f"[Episode {episode_idx}] Overall MSE: {mse_overall:.6f}, MAE: {mae_overall:.6f}")
++
++    # Save results
++    ep_output_dir = output_dir / f"episode_{episode_idx:06d}"
++    ep_output_dir.mkdir(parents=True, exist_ok=True)
++
++    np.savez_compressed(ep_output_dir / "rollout_actions.npz", actions=rollout_actions)
++    np.savez_compressed(ep_output_dir / "rollout_states.npz", states=rollout_states)
++    np.savez_compressed(ep_output_dir / "ground_truth.npz", ground_truth=gt_actions)
++    np.savez_compressed(ep_output_dir / "cumulative_error.npz",
++                       cumulative_mse=cum_error,
++                       per_step_mse=error_per_step)
++
++    # Build output dict
++    errors = {
++        "mse_overall": float(mse_overall),
++        "mae_overall": float(mae_overall),
++        "mse_per_joint": mse_per_joint,
++        "mae_per_joint": mae_per_joint,
++    }
++
++    log_data = {
++        "mode": "rtc_rollout",
++        "episode_idx": episode_idx,
++        "num_inferences": len(inference_times),
++        "steps_executed": rollout_len,
++        "action_chunk_length": action_chunk_length,
++        "n_action_steps": n_action_steps,
++        "avg_inference_time_s": float(np.mean(inference_times)),
++        "std_inference_time_s": float(np.std(inference_times)),
++        "mse_overall": errors["mse_overall"],
++        "mae_overall": errors["mae_overall"],
++        "mse_per_joint": errors["mse_per_joint"].tolist(),
++        "mae_per_joint": errors["mae_per_joint"].tolist(),
++    }
++    with open(ep_output_dir / "inference_log.json", "w") as f:
++        json.dump(log_data, f, indent=2)
++
++    # Generate plots
++    if save_plots:
++        # Create a (T, 1, 6) prediction array for the plot function
++        pred_expanded = rollout_actions[:, np.newaxis, :]  # (T, 1, 6)
++        gt_expanded = gt_actions[:, np.newaxis, :]
++        plot_rollout_curves(rollout_actions, gt_actions, KOCH_MOTOR_NAMES,
++                           error_per_step, cum_error, ep_output_dir, episode_idx)
++
++    return log_data
++
++
++# ==============================================================================
++# Metrics
++# ==============================================================================
++
++def compute_metrics(predictions: np.ndarray, ground_truth: np.ndarray) -> Dict[str, np.ndarray]:
++    """
++    Compute error metrics between predictions and ground truth.
++
++    Args:
++        predictions: (F, 16, 6) predicted actions
++        ground_truth: (F, 16, 6) ground truth actions
++
++    Returns:
++        Dict with mse_overall, mae_overall, mse_per_joint, mae_per_joint
++    """
++    error = predictions - ground_truth  # (F, 16, 6)
++
++    mse_overall = np.mean(np.square(error))
++    mae_overall = np.mean(np.abs(error))
++
++    # Per-joint metrics (average over F and chunk_length)
++    mse_per_joint = np.square(error).mean(axis=(0, 1))  # (6,)
++    mae_per_joint = np.abs(error).mean(axis=(0, 1))     # (6,)
++
++    # Per-step metrics (average over F and joints)
++    mse_per_step = np.square(error).mean(axis=(0, 2))   # (16,)
++    mae_per_step = np.abs(error).mean(axis=(0, 2))      # (16,)
++
++    return {
++        "mse_overall": mse_overall,
++        "mae_overall": mae_overall,
++        "mse_per_joint": mse_per_joint,
++        "mae_per_joint": mae_per_joint,
++        "mse_per_step": mse_per_step,
++        "mae_per_step": mae_per_step,
++    }
++
++
++# ==============================================================================
++# Visualization
++# ==============================================================================
++
++def plot_action_curves(
++    predictions: np.ndarray,
++    ground_truth: np.ndarray,
++    joint_names: List[str],
++    output_dir: Path,
++    episode_idx: int,
++):
++    """
++    Plot predicted vs ground truth action curves for single-frame mode.
++
++    Args:
++        predictions: (F, 16, 6) predicted actions
++        ground_truth: (F, 16, 6) ground truth actions
++        joint_names: Names of the 6 joints
++        output_dir: Output directory for the plot
++        episode_idx: Episode index for title
++    """
++    num_joints = len(joint_names)
++    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
++    fig.suptitle(f"Episode {episode_idx}: Predicted vs Ground Truth Actions (16-step chunks)", fontsize=14)
++
++    for j in range(num_joints):
++        ax = axes[j // 3, j % 3]
++
++        # Show 4 example frames evenly spaced
++        frame_indices = np.linspace(0, predictions.shape[0] - 1, min(4, predictions.shape[0])).astype(int)
++        colors = plt.cm.viridis(np.linspace(0, 1, len(frame_indices)))
++
++        for fi, (f_idx, color) in enumerate(zip(frame_indices, colors)):
++            gt = ground_truth[f_idx, :, j]   # (16,)
++            pred = predictions[f_idx, :, j]   # (16,)
++            steps = np.arange(16)
++
++            ax.plot(steps, gt, 'o-', color=color, alpha=0.5, linewidth=2,
++                   label=f'GT (f={f_idx})' if fi == 0 else None)
++            ax.plot(steps, pred, 's--', color=color, alpha=0.7, linewidth=2,
++                   label=f'Pred (f={f_idx})' if fi == 0 else None)
++
++        ax.set_title(joint_names[j])
++        ax.set_xlabel("Chunk step")
++        ax.set_ylabel("Joint position")
++        ax.legend(fontsize=7)
++        ax.grid(True, alpha=0.3)
++
++    plt.tight_layout()
++    plt.savefig(output_dir / "action_curves.png", dpi=150, bbox_inches='tight')
++    plt.close()
++    logger.info(f"[Episode {episode_idx}] Action curves saved to {output_dir / 'action_curves.png'}")
++
++
++def plot_rollout_curves(
++    rollout_actions: np.ndarray,
++    gt_actions: np.ndarray,
++    joint_names: List[str],
++    error_per_step: np.ndarray,
++    cum_error: np.ndarray,
++    output_dir: Path,
++    episode_idx: int,
++):
++    """
++    Plot rollout action curves and error metrics for RTC mode.
++
++    Args:
++        rollout_actions: (T, 6) predicted actions executed
++        gt_actions: (T, 6) ground truth actions
++        joint_names: Names of the 6 joints
++        error_per_step: (T,) per-step MSE
++        cum_error: (T,) cumulative MSE
++        output_dir: Output directory
++        episode_idx: Episode index
++    """
++    T = len(rollout_actions)
++    num_joints = len(joint_names)
++    time_steps = np.arange(T)
++
++    fig, axes = plt.subplots(3, 3, figsize=(20, 15))
++    fig.suptitle(f"Episode {episode_idx}: RTC Rollout Results", fontsize=14)
++
++    # Plot each joint (top 2 rows, 6 joints)
++    for j in range(num_joints):
++        ax = axes[j // 3, j % 3]
++        ax.plot(time_steps, gt_actions[:, j], 'b-', linewidth=1, alpha=0.6, label='Ground Truth')
++        ax.plot(time_steps, rollout_actions[:, j], 'r--', linewidth=1, alpha=0.8, label='Predicted')
++        ax.set_title(joint_names[j])
++        ax.set_xlabel("Step")
++        ax.set_ylabel("Position")
++        ax.legend(fontsize=7)
++        ax.grid(True, alpha=0.3)
++
++    # Plot per-step error
++    ax_err = axes[2, 0]
++    ax_err.plot(time_steps, error_per_step, 'k-', linewidth=0.5, alpha=0.7)
++    ax_err.set_title("Per-Step MSE")
++    ax_err.set_xlabel("Step")
++    ax_err.set_ylabel("MSE")
++    ax_err.grid(True, alpha=0.3)
++
++    # Plot cumulative error
++    ax_cum = axes[2, 1]
++    ax_cum.plot(time_steps, cum_error, 'r-', linewidth=1.5)
++    ax_cum.set_title("Cumulative MSE")
++    ax_cum.set_xlabel("Step")
++    ax_cum.set_ylabel("Cumulative MSE")
++    ax_cum.grid(True, alpha=0.3)
++
++    # Hide unused subplot
++    axes[2, 2].set_visible(False)
++
++    plt.tight_layout()
++    plt.savefig(output_dir / "rollout_curves.png", dpi=150, bbox_inches='tight')
++    plt.close()
++    logger.info(f"[Episode {episode_idx}] Rollout curves saved to {output_dir / 'rollout_curves.png'}")
++
++
++# ==============================================================================
++# Main Entry Point
++# ==============================================================================
++
++def parse_args():
++    parser = argparse.ArgumentParser(
++        description="Being-H05 Offline Video Inference",
++        formatter_class=argparse.RawDescriptionHelpFormatter,
++        epilog="""
++Examples:
++  # Single-frame inference
++  python offline_inference.py \\
++      --data_path origin_data_v21/koch_follower/pick_orange_simple_shape \\
++      --checkpoint Being-H05/checkpoints/koch_all_data_20260603_214251/0010000 \\
++      --output_dir output/inference/pick_orange_simple_shape \\
++      --mode single_frame
++
++  # RTC rollout inference
++  python offline_inference.py \\
++      --data_path origin_data_v21/koch_follower/pick_orange_simple_shape \\
++      --checkpoint Being-H05/checkpoints/koch_all_data_20260603_214251/0010000 \\
++      --output_dir output/inference/pick_orange_simple_shape \\
++      --mode rtc_rollout \\
++      --n_action_steps 4
++        """,
++    )
++
++    # Required arguments
++    parser.add_argument("--data_path", type=str, required=True,
++                       help="Path to LeRobot v2.1 dataset directory")
++    parser.add_argument("--checkpoint", type=str, required=True,
++                       help="Path to Being-H05 checkpoint directory (containing safetensors + config.json)")
++    parser.add_argument("--output_dir", type=str, required=True,
++                       help="Output directory for inference results")
++    parser.add_argument("--mode", type=str, default="single_frame",
++                       choices=["single_frame", "rtc_rollout"],
++                       help="Inference mode: 'single_frame' or 'rtc_rollout'")
++
++    # Optional arguments
++    parser.add_argument("--task", type=str, default=None,
++                       help="Task instruction (auto-detected from tasks.jsonl if not provided)")
++    parser.add_argument("--episodes", type=int, default=0,
++                       help="Number of episodes to infer (0=all)")
++    parser.add_argument("--data_config_name", type=str, default="koch_follower",
++                       help="Being-H05 data config name")
++    parser.add_argument("--dataset_name", type=str, default="koch_posttrain",
++                       help="Dataset group name for metadata")
++    parser.add_argument("--embodiment_tag", type=str, default="koch",
++                       help="Robot embodiment identifier")
++    parser.add_argument("--n_action_steps", type=int, default=4,
++                       help="Number of steps to execute per chunk (RTC mode only)")
++    parser.add_argument("--enable_rtc", action="store_true", default=True,
++                       help="Enable Real-Time Chunking")
++    parser.add_argument("--num_inference_timesteps", type=int, default=None,
++                       help="Override flow matching ODE steps (default from checkpoint)")
++    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
++                       help="Inference device")
++    parser.add_argument("--no_plots", action="store_true",
++                       help="Skip generating visualization plots")
++    parser.add_argument("--metadata_variant", type=str, default=None,
++                       help="Metadata variant to use (e.g., 'pick_orange_simple_shape')")
++
++    return parser.parse_args()
++
++
++def main():
++    args = parse_args()
++
++    # Resolve paths
++    data_path = Path(args.data_path).resolve()
++    checkpoint_path = Path(args.checkpoint).resolve()
++    output_dir = Path(args.output_dir).resolve()
++
++    # Validate paths
++    if not data_path.exists():
++        logger.error(f"Data path does not exist: {data_path}")
++        sys.exit(1)
++    if not checkpoint_path.exists():
++        logger.error(f"Checkpoint path does not exist: {checkpoint_path}")
++        sys.exit(1)
++
++    # Check for required checkpoint files
++    required_files = ["config.json", "tokenizer.json"]
++    missing = [f for f in required_files if not (checkpoint_path / f).exists()]
++    # Also check for safetensors via glob (sharded or single)
++    safetensor_files = list(checkpoint_path.glob("*.safetensors"))
++    if not safetensor_files:
++        missing.append("*.safetensors (no safetensor files found)")
++
++    if missing:
++        logger.error(f"Missing required files in checkpoint directory: {missing}")
++        sys.exit(1)
++
++    # Create output directory
++    output_dir.mkdir(parents=True, exist_ok=True)
++    logger.info(f"Output directory: {output_dir}")
++
++    # =====================================================================
++    # Load dataset info
++    # =====================================================================
++    meta_dir = data_path / "meta"
++    info_path = meta_dir / "info.json"
++    if not info_path.exists():
++        logger.error(f"Dataset info.json not found: {info_path}")
++        sys.exit(1)
++
++    dataset_info = load_dataset_info(meta_dir)
++    total_episodes = dataset_info["total_episodes"]
++    logger.info(f"Dataset: {total_episodes} episodes, {dataset_info['total_frames']} total frames")
++
++    # Get task instruction
++    instruction = args.task
++    if instruction is None:
++        instruction = load_task_instruction(meta_dir)
++    logger.info(f"Task instruction: '{instruction}'")
++
++    # Determine episodes to process
++    num_episodes = args.episodes if args.episodes > 0 else total_episodes
++    num_episodes = min(num_episodes, total_episodes)
++    logger.info(f"Processing {num_episodes} episodes")
++
++    # =====================================================================
++    # Load Being-H05 Policy
++    # =====================================================================
++    logger.info(f"\n{'='*60}")
++    logger.info(f"Loading Being-H05 model from: {checkpoint_path}")
++    logger.info(f"Device: {args.device}")
++    logger.info(f"{'='*60}\n")
++
++    # Instruction template matching training
++    instruction_template = (
++        "According to the instruction '{task_description}', "
++        "what's the micro-step actions in the next {k} steps?"
++    )
++
++    try:
++        policy = BeingHPolicy(
++            model_path=str(checkpoint_path),
++            data_config_name=args.data_config_name,
++            dataset_name=args.dataset_name,
++            embodiment_tag=args.embodiment_tag,
++            instruction_template=instruction_template,
++            max_view_num=-1,
++            use_fixed_view=False,
++            action_attn_mode="causal",
++            device=args.device,
++            enable_rtc=args.enable_rtc,
++            num_inference_timesteps=args.num_inference_timesteps,
++            metadata_variant=args.metadata_variant,
++        )
++    except Exception as e:
++        logger.error(f"Failed to load BeingHPolicy: {e}")
++        logger.error(traceback.format_exc())
++        sys.exit(1)
++
++    logger.info("Model loaded successfully ✓\n")
++
++    # =====================================================================
++    # Save inference configuration
++    # =====================================================================
++    config_record = {
++        "data_path": str(data_path),
++        "checkpoint": str(checkpoint_path),
++        "mode": args.mode,
++        "task": instruction,
++        "num_episodes": num_episodes,
++        "data_config_name": args.data_config_name,
++        "dataset_name": args.dataset_name,
++        "embodiment_tag": args.embodiment_tag,
++        "action_chunk_length": policy.action_chunk_length,
++        "num_inference_timesteps": policy.model.config.num_inference_timesteps,
++        "enable_rtc": args.enable_rtc,
++        "n_action_steps": args.n_action_steps,
++        "device": args.device,
++        "metadata_variant": args.metadata_variant,
++        "stats_level": policy.stats_level,
++        "stats_source": policy.stats_source,
++    }
++    with open(output_dir / "inference_config.json", "w") as f:
++        json.dump(config_record, f, indent=2, default=str)
++
++    # =====================================================================
++    # Run Inference
++    # =====================================================================
++    data_dir = data_path
++    videos_dir = data_path / "videos"
++    save_plots = not args.no_plots
++
++    all_results = []
++    total_start = time.perf_counter()
++
++    for ep_idx in range(num_episodes):
++        logger.info(f"\n{'='*60}")
++        logger.info(f"Episode {ep_idx}/{num_episodes}")
++        logger.info(f"{'='*60}")
++
++        ep_start = time.perf_counter()
++
++        try:
++            if args.mode == "single_frame":
++                result = run_single_frame_inference(
++                    policy=policy,
++                    data_dir=data_dir,
++                    videos_dir=videos_dir,
++                    episode_idx=ep_idx,
++                    instruction=instruction,
++                    output_dir=output_dir,
++                    save_plots=save_plots,
++                )
++            elif args.mode == "rtc_rollout":
++                result = run_rtc_rollout_inference(
++                    policy=policy,
++                    data_dir=data_dir,
++                    videos_dir=videos_dir,
++                    episode_idx=ep_idx,
++                    instruction=instruction,
++                    output_dir=output_dir,
++                    n_action_steps=args.n_action_steps,
++                    save_plots=save_plots,
++                )
++            else:
++                raise ValueError(f"Unknown mode: {args.mode}")
++
++            ep_elapsed = time.perf_counter() - ep_start
++            result["episode_time_s"] = ep_elapsed
++            all_results.append(result)
++
++            logger.info(f"[Episode {ep_idx}] Time: {ep_elapsed:.1f}s")
++
++        except Exception as e:
++            logger.error(f"[Episode {ep_idx}] Failed: {e}")
++            logger.error(traceback.format_exc())
++            all_results.append({"episode_idx": ep_idx, "error": str(e)})
++
++    total_elapsed = time.perf_counter() - total_start
++
++    # =====================================================================
++    # Generate Summary
++    # =====================================================================
++    logger.info(f"\n{'='*60}")
++    logger.info(f"Inference Complete")
++    logger.info(f"{'='*60}")
++    logger.info(f"Total time: {total_elapsed:.1f}s ({total_elapsed/60:.1f} min)")
++    logger.info(f"Episodes: {len(all_results)}")
++
++    successful = [r for r in all_results if "error" not in r]
++    if successful:
++        avg_mse = np.mean([r["mse_overall"] for r in successful])
++        avg_mae = np.mean([r["mae_overall"] for r in successful])
++        avg_time = np.mean([r.get("avg_inference_time_s", 0) for r in successful])
++        logger.info(f"Successful episodes: {len(successful)}/{len(all_results)}")
++        logger.info(f"Average MSE: {avg_mse:.6f}")
++        logger.info(f"Average MAE: {avg_mae:.6f}")
++        logger.info(f"Average inference time: {avg_time:.4f}s")
++
++    # Save summary
++    summary = {
++        "total_time_s": total_elapsed,
++        "num_episodes_total": len(all_results),
++        "num_episodes_successful": len(successful),
++        "num_episodes_failed": len(all_results) - len(successful),
++        "results": all_results,
++        "config": config_record,
++    }
++    with open(output_dir / "summary.json", "w") as f:
++        json.dump(summary, f, indent=2, default=str)
++
++    logger.info(f"\nResults saved to: {output_dir}")
++    logger.info(f"Summary: {output_dir / 'summary.json'}")
++    logger.info(f"Config: {output_dir / 'inference_config.json'}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git "a/H05\346\216\250\347\220\206.md" "b/H05\346\216\250\347\220\206.md"
+new file mode 100644
+index 0000000..56543e7
+--- /dev/null
++++ "b/H05\346\216\250\347\220\206.md"
+@@ -0,0 +1,667 @@
++# Being-H05 离线视频推理
++
++## 1. 推理脚本架构
++
++### 1.1 整体架构
++
++```
++┌─────────────────────────────────────────────────────────────────────┐
++│                     offline_inference.py                            │
++│                                                                     │
++│  ┌──────────────┐    ┌──────────────────┐    ┌───────────────────┐  │
++│  │ Data Loader  │ →  │ Observation      │ →  │ BeingHPolicy      │  │
++│  │              │    │ Builder          │    │                   │  │
++│  │ parquet 读取 │    │ 图像预处理+归一化│    │ ViT 编码图像     │  │
++│  │ mp4 视频解码 │    │ 状态归一化       │    │ LLM+Action Expert│  │
++│  │ 任务指令加载 │    │ 统一空间映射     │    │ Flow Matching ODE│  │
++│  └──────────────┘    └──────────────────┘    └───────────────────┘  │
++│                                                      │              │
++│                                                      ▼              │
++│                           ┌──────────────────────────────────────┐  │
++│                           │ Output Saver                         │  │
++│                           │                                     │  │
++│                           │ • 预测动作 vs 真值动作 对比           │  │
++│                           │ • 动作曲线可视化 (PNG)                │  │
++│                           │ • 数值结果保存 (NPY/NPZ)              │  │
++│                           │ • 推理日志记录                        │  │
++│                           └──────────────────────────────────────┘  │
++└─────────────────────────────────────────────────────────────────────┘
++```
++
++### 1.2 数据流
++
++```
++                  origin_data_v21/koch_follower/pick_orange_simple_shape/
++                         │
++            ┌────────────┼────────────┐
++            ▼            ▼            ▼
++      videos/         data/         meta/
++   above/*.mp4    chunk-000/      tasks.jsonl
++   wrist/*.mp4    *.parquet       info.json
++            │            │            │
++            ▼            ▼            ▼
++       decord 解码   pandas 读取   json 解析
++       → np.uint8   → np.float32  → str
++       (N,H,W,C)    (N,6)         "pick the orange..."
++            │            │            │
++            └────────────┼────────────┘
++                         │
++                         ▼
++              Observation Dict:
++              {
++                "video.above": np.uint8 (H=480,W=640,C=3),
++                "video.wrist": np.uint8 (H=480,W=640,C=3),
++                "state.arm_joint_position": np.float32 (5,),
++                "state.gripper_position": np.float32 (1,),
++                "language.instruction": ["pick the orange toy..."],
++                "prev_chunk": np.float32 (16,200),  // RTC mode only
++                "inference_delay": 4                  // RTC mode only
++              }
++                         │
++                         ▼
++              BeingHPolicy.get_action()
++                         │
++                         ▼
++              Action Dict:
++              {
++                "action.arm_joint_position": [[...]*16],  // (16,5) 去归一化后的关节角度
++                "action.gripper_position": [[...]*16],     // (16,1) 去归一化后的夹爪位置
++                "action_unified": [[...]*16]               // (16,200) 统一空间中的动作 (RTC用)
++              }
++```
++
++### 1.3 核心组件说明
++
++#### 1.3.1 Data Loader
++
++**功能**：从 LeRobot v2.1 格式数据集中读取数据
++
++**输入**：
++- 视频目录：`videos/chunk-000/observation.images.above/*.mp4` 和 `observation.images.wrist/*.mp4`
++- Parquet 数据目录：`data/chunk-000/*.parquet`
++- 元数据目录：`meta/tasks.jsonl`, `meta/info.json`
++
++**实现要点**：
++- 使用 `decord.VideoReader` 读取 MP4 视频帧（比 OpenCV 快 5-10x）
++- 使用 `pandas.read_parquet` 读取状态/动作数据
++- 视频分辨率：640×480，30fps，AV1 编码
++- Parquet 列：`observation.state`（6维）、`action`（6维）、`timestamp`、`frame_index` 等
++
++**关键代码**：
++```python
++import decord
++import pandas as pd
++
++# 读取视频帧
++vr = decord.VideoReader("episode_000000.mp4")
++frames = vr.get_batch(range(len(vr))).asnumpy()  # (N, 480, 640, 3) uint8
++
++# 读取 Parquet
++df = pd.read_parquet("episode_000000.parquet")
++states = np.stack(df['observation.state'].values)  # (N, 6) float32
++actions = np.stack(df['action'].values)            # (N, 6) float32
++```
++
++#### 1.3.2 Observation Builder
++
++**功能**：将原始数据转换为 Being-H05 模型所需格式
++
++**输入格式转换**：
++```
++parquet observation.state[6]:
++  [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper]
++                                        ↓
++Being-H05 格式:
++  state.arm_joint_position: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll]  (5,)
++  state.gripper_position:   [gripper]                                                          (1,)
++```
++
++**图像预处理**（由 BeingHPolicy 内部 `image_transform` 完成）：
++1. 转换为 RGB
++2. Resize 到 224（BICUBIC + antialias）
++3. CenterCrop 到 224×224
++4. ToTensor（除以 255，HWC→CHW）
++5. ImageNet 归一化：mean=(0.485,0.456,0.406), std=(0.229,0.224,0.225)
++
++**状态归一化**（由 `StateActionTransform` 完成，min_max 模式）：
++```python
++normalized = 2 * (x - min) / (max - min) - 1   # 映射到 [-1, 1]
++```
++
++**统一空间映射**（`UNIFIED_MAPPING`）：
++```
++unified_state[200]:
++  state.arm_joint_position → indices [50, 55)  (5 dims)
++  state.gripper_position   → indices [18, 19)  (1 dim)
++  其余 194 维 → 零填充（为其他机器人预留）
++
++unified_action[200]:
++  action.arm_joint_position → indices [50, 55)  (5 dims)
++  action.gripper_position   → indices [18, 19)  (1 dim)
++  其余 194 维 → 零填充
++```
++
++#### 1.3.3 BeingHPolicy
++
++**模型配置**：
++| 组件 | 参数 |
++|------|------|
++| ViT | InternViT, hidden=1024, 24层, patch_size=14, image_size=224 |
++| ViT token 数 | 64/图 (224/14=16, downsample 0.5, → 64) |
++| LLM | Qwen3-1.7B MoE, hidden=2048, 28层 |
++| Action Expert | Qwen3 DecoderLayer, hidden=1024, 28层 |
++| Flow Matching | 4步 ODE 积分 (beta_alpha=1.5, beta_beta=1.0, s=0.999) |
++| Action Chunk | 16步 |
++| 精度 | bfloat16 |
++| Attn Mode | causal |
++
++**提示词模板（being_h0）**：
++```
++<|im_start|>system
++You are Being-H0, a helpful and harmless AI assistant developed by BeingBeyond.<|im_end|>
++<|im_start|>user
++<img><|vision_start|>(64个ViT token × 2张图)<|vision_end|></img>
++<|state_start|>(1个state token)<|state_end|>According to the instruction 'pick the orange toy and place into box', what's the micro-step actions in the next 16 steps?<|im_end|>
++<|im_start|>assistant
++<|action_start|>(16个action token)<|action_end|><|im_end|>
++```
++
++#### 1.3.4 Output Saver
++
++**输出内容**：
++1. **预测动作 vs 真值动作对比**：每个 episode 保存为 `.npz` 文件
++2. **可视化图表**：6 个关节的动作曲线对比（pred vs GT），保存为 PNG
++3. **统计指标**：MSE、MAE 等误差指标
++4. **推理日志**：记录推理耗时、参数等信息
++
++### 1.4 两种推理模式
++
++#### Mode 1: 单帧推理（Open-Loop）
++- 从 episode 的每一帧独立推理
++- 以当前状态 + 两张图预测 16 步动作
++- 与 ground truth 比较评估精度
++- 不使用 RTC
++
++#### Mode 2: 滚动推理（Closed-Loop with RTC）
++- 模拟真实部署场景
++- 使用 Prediction: 每 4 步重新推理，用 `prev_chunk` 做 prefix locking
++- 滚动执行整个 episode
++- 更接近真实机器人部署效果
++
++## 2. 推理脚本使用说明
++
++### 2.1 环境依赖
++
++```bash
++# 在 beingh conda 环境中运行
++conda activate beingh
++
++# 额外依赖（beingh 环境已包含大部分）
++pip install matplotlib decord
++```
++
++### 2.2 运行命令
++
++```bash
++cd /home/hyl/Being-H
++
++# 基本用法 - 单帧推理
++conda activate beingh
++python Being-H05/scripts/inference/offline_inference.py \
++    --data_path origin_data_v21/koch_follower/pick_orange_simple_shape \
++    --checkpoint Being-H05/checkpoints/koch_all_data_20260603_214251/0010000 \
++    --output_dir output/inference/pick_orange_simple_shape \
++    --mode single_frame \
++    --task "pick the orange toy and place into box"
++
++# RTC 滚动推理
++python Being-H05/scripts/inference/offline_inference.py \
++    --data_path origin_data_v21/koch_follower/pick_orange_simple_shape \
++    --checkpoint Being-H05/checkpoints/koch_all_data_20260603_214251/0010000 \
++    --output_dir output/inference/pick_orange_simple_shape \
++    --mode rtc_rollout \
++    --task "pick the orange toy and place into box" \
++    --n_action_steps 4
++```
++
++### 2.3 参数说明
++
++#### 必选参数
++
++| 参数 | 类型 | 说明 |
++|------|------|------|
++| `--data_path` | `str` | LeRobot v2.1 格式数据集路径。必须包含 `meta/`、`data/`、`videos/` 三个子目录 |
++| `--checkpoint` | `str` | Being-H05 模型 checkpoint 目录路径。必须包含 `config.json`、`tokenizer.json`、`*.safetensors` 和 `*_metadata.json` |
++| `--output_dir` | `str` | 推理结果输出目录。会自动创建，每次运行覆盖已有文件 |
++| `--mode` | `str` | 推理模式，可选值：`single_frame`（单帧独立推理）或 `rtc_rollout`（RTC 滚动推理） |
++
++#### 可选参数
++
++| 参数 | 类型 | 默认值 | 说明 |
++|------|------|--------|------|
++| `--task` | `str` | 自动检测 | 任务指令文本。不指定时自动从 `meta/tasks.jsonl` 读取第一条 |
++| `--episodes` | `int` | `0`（全部） | 推理的 episode 数量。从 episode_000000 开始顺序选取 |
++| `--data_config_name` | `str` | `koch_follower` | Being-H05 数据配置名。对应 `configs/data_config.py` 中的 `DATA_CONFIG_MAP` 键。可选：`koch_follower`、`libero_nonorm`、`robocasa_human` |
++| `--dataset_name` | `str` | `koch_posttrain` | 数据集组名，用于加载归一化统计量（metadata）。对应 checkpoint 中 `{dataset_name}_metadata.json` 的前缀 |
++| `--embodiment_tag` | `str` | `koch` | 机器人实施例标识。决定 Action Expert 的 projector index 和统一空间映射。可选：`koch`、`libero`、`libero_franka_gripper`、`robocasa` |
++| `--n_action_steps` | `int` | `4` | **仅 RTC 模式**。每个 16 步动作块中实际执行的步数，之后重新推理。值越小精度越高但推理开销越大 |
++| `--enable_rtc` | `flag` | `True` | 启用 Real-Time Chunking（默认开启）。关闭后模型不使用 prefix locking |
++| `--num_inference_timesteps` | `int` | `None`（用 checkpoint 配置） | 覆盖 Flow Matching ODE 积分步数。不指定时使用 checkpoint 的 `config.json` 中的值（当前为 4） |
++| `--device` | `str` | `cuda`（如可用） | 推理设备。可选 `cuda`、`cpu`、`cuda:0` 等 |
++| `--no_plots` | `flag` | `False` | 跳过生成 `action_curves.png` 可视化图表。在批量评估时可用于加速 |
++| `--metadata_variant` | `str` | `None`（自动选择） | 指定归一化统计量的变体。例如 `pick_orange_simple_shape` 使用该任务专属的 min/max 统计量。不指定时自动选择第一个可用变体 |
++
++#### 使用示例
++
++```bash
++cd /home/hyl/Being-H
++conda activate beingh
++
++# 1) 最简用法：单帧推理，自动检测 task，处理全部 4 个 episode，生成图表
++python Being-H05/scripts/inference/offline_inference.py \
++    --data_path origin_data_v21/koch_follower/pick_orange_simple_shape \
++    --checkpoint Being-H05/checkpoints/koch_all_data_20260603_214251/0010000 \
++    --output_dir output/inference/pick_orange_simple_shape \
++    --mode single_frame
++
++# 2) 只推理 1 个 episode + 跳过绘图（加速评估）
++python Being-H05/scripts/inference/offline_inference.py \
++    --data_path origin_data_v21/koch_follower/pick_orange_simple_shape \
++    --checkpoint Being-H05/checkpoints/koch_all_data_20260603_214251/0010000 \
++    --output_dir output/inference/test \
++    --mode single_frame \
++    --episodes 1 \
++    --no_plots
++
++# 3) RTC 滚动推理，指定 task 和 n_action_steps
++python Being-H05/scripts/inference/offline_inference.py \
++    --data_path origin_data_v21/koch_follower/pick_orange_simple_shape \
++    --checkpoint Being-H05/checkpoints/koch_all_data_20260603_214251/0010000 \
++    --output_dir output/inference/rtc_test \
++    --mode rtc_rollout \
++    --task "pick the orange toy and place into box" \
++    --n_action_steps 4
++
++# 4) 指定 metadata variant + Flow Matching 步数覆盖
++python Being-H05/scripts/inference/offline_inference.py \
++    --data_path origin_data_v21/koch_follower/pick_orange_simple_shape \
++    --checkpoint Being-H05/checkpoints/koch_all_data_20260603_214251/0010000 \
++    --output_dir output/inference/test \
++    --mode single_frame \
++    --metadata_variant pick_orange_simple_shape \
++    --num_inference_timesteps 8
++```
++
++### 2.4 输出文件结构
++
++```
++output/inference/pick_orange_simple_shape/
++├── episode_000000/
++│   ├── predictions.npz          # 预测动作 (N, 16, 6)
++│   ├── ground_truth.npz         # 真值动作 (N, 16, 6)
++│   ├── errors.npz               # 误差指标 (MSE, MAE per dim)
++│   ├── action_curves.png        # 动作曲线对比图
++│   └── inference_log.txt        # 推理日志
++├── episode_000001/
++│   └── ...
++├── summary.json                 # 汇总指标
++└── inference_config.json        # 推理配置记录
++```
++
++---
++
++## 3. 推理过程中的问题和解决方案
++
++### 3.1 问题记录
++
++| # | 问题 | 原因 | 解决方案 | 状态 |
++|---|------|------|----------|------|
++| 1 | `'KochFollowerDataConfig' object has no attribute 'LANGUAGE_KEYS'` | `KochFollowerDataConfig` 类缺少 `LANGUAGE_KEYS` 属性，其他 DataConfig 类（如 `LiberoOriginDataConfig`）都有该属性，`BeingHPolicy.__init__` 需要它来获取语言指令键名 | 在 `configs/data_config.py` 的 `KochFollowerDataConfig` 中添加 `LANGUAGE_KEYS = ['language.instruction']` | ✅ 已解决 |
++| 2 | `not enough values to unpack (expected 2, got 1)` — `_prepare_packed_inputs` 中 `N, _ = processed_obs[first_state_key].shape` 失败 | `BeingHPolicy._check_is_batched()` 检查 dict 的第一个值：单帧推理时第一个值是 3D 图像数组 (H,W,C)，`ndim > 1` 且 key 含 `"video"`，误判为已 batch，跳过了 `unsqueeze_dict_values`，导致 state tensor 保持 1D | 在 `build_observation()` 中将 state key 放在 dict 最前面（1D array，ndim=1），使 `_check_is_batched` 返回 `False`，正确触发 unsqueeze | ✅ 已解决 |
++| 3 | 模型加载依赖 `flash_attn` 和其他 beingh 环境包 | 模型使用 `flash_attn`、`numpydantic`、`pytorch3d` 等包 | 使用 `beingh` conda 环境（已包含所有依赖） | ✅ 已解决 |
++
++### 3.2 输出文件详解
++
++推理脚本在 `output/inference/pick_orange_simple_shape/` 下生成以下文件：
++
++```
++output/inference/pick_orange_simple_shape/
++├── inference_config.json             # 推理运行配置快照
++├── summary.json                      # 全局汇总结果
++├── episode_000000/
++│   ├── predictions.npz               # 模型预测动作 (300, 16, 6)
++│   ├── ground_truth.npz              # 真值动作 (300, 16, 6)
++│   ├── errors.npz                    # 误差指标数组
++│   ├── action_curves.png             # 动作曲线对比图 (2684×1475)
++│   └── inference_log.json            # 单 episode 推理日志
++├── episode_000001/ ...
++├── episode_000002/ ...
++└── episode_000003/ ...
++```
++
++#### 3.2.1 inference_config.json — 推理配置快照
++
++记录本次推理的完整运行参数，用于结果复现：
++
++```json
++{
++  "data_path": ".../pick_orange_simple_shape",
++  "checkpoint": ".../koch_all_data_20260603_214251/0010000",
++  "mode": "single_frame",
++  "task": "pick the orange toy and place into box",
++  "num_episodes": 4,
++  "action_chunk_length": 16,
++  "num_inference_timesteps": 4,
++  "enable_rtc": true,
++  "device": "cuda",
++  "stats_level": "task",
++  "stats_source": "auto:pick_orange_simple_shape"
++}
++```
++
++**说明**：
++- `stats_level: "task"`、`stats_source: "auto:pick_orange_simple_shape"` — 模型自动匹配到 `pick_orange_simple_shape` 任务级别的归一化统计量（min/max），这是元数据中最细粒度的统计信息
++- `enable_rtc: true` — 虽然在 single_frame 模式下实际不使用 RTC prefix locking（不传入 `prev_chunk`），但模型配置中 RTC 推理已启用
++
++#### 3.2.2 summary.json — 全局汇总
++
++```json
++{
++  "total_time_s": 275.8,
++  "num_episodes_total": 4,
++  "num_episodes_successful": 4,
++  "num_episodes_failed": 0,
++  "config": { ... },
++  "results": [
++    { "episode_idx": 0, "mse_overall": 48.18, "mae_overall": 4.45, ... },
++    ...
++  ]
++}
++```
++
++包含每个 episode 的结果摘要和全局配置，`results` 数组中每个元素对应一个 episode 的核心指标。
++
++#### 3.2.3 predictions.npz — 预测动作
++
++- **形状**：`(F, 16, 6)` — F 次推理 × 16 步动作块 × 6 个关节
++- **数据类型**：float64（去归一化后的原始角度值）
++- **6 关节顺序**：`[shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper]`
++- **数值范围示例**（Episode 2，最佳 episode）：
++
++| 关节 | Pred 范围 | GT 范围 | 偏差 (bias) | 标准差 (std) |
++|------|-----------|---------|-------------|-------------|
++| shoulder_pan | [-8.2, 43.3] | [-5.2, 39.6] | +0.19 | 2.15 |
++| shoulder_lift | [-96.1, 18.4] | [-81.4, 8.6] | -3.23 | 5.11 |
++| elbow_flex | [-89.0, 40.4] | [-78.8, 28.7] | +0.81 | 6.33 |
++| wrist_flex | [-70.2, -21.0] | [-67.7, -22.9] | +1.40 | 4.57 |
++| wrist_roll | [-0.8, 16.9] | [1.2, 16.2] | -0.13 | 1.27 |
++| gripper | [25.2, 52.9] | [29.3, 50.1] | +0.20 | 2.34 |
++
++**关键观察**：
++- shoulder_lift 有系统性负偏差（-3.23），模型倾向于预测更低的肩部抬升角度
++- wrist_roll 偏差最小（-0.13），且标准差最低（1.27），预测最稳定
++- gripper 预测上限（52.9）超出 GT 上限（50.1），说明模型偶尔预测过度夹紧
++
++#### 3.2.4 ground_truth.npz — 真值动作
++
++- **形状**：与 `predictions.npz` 相同 `(F, 16, 6)`
++- **内容**：从 Parquet 文件中读取的原始动作数据（已对齐到推理窗口）
++- **用途**：作为预测评估的 ground truth 参照
++
++#### 3.2.5 errors.npz — 误差指标数组
++
++包含 6 个数组，支持多维度误差分析：
++
++| 键名 | 形状 | 说明 |
++|------|------|------|
++| `mse_overall` | scalar | 全局均方误差 |
++| `mae_overall` | scalar | 全局平均绝对误差 |
++| `mse_per_joint` | (6,) | 每关节 MSE |
++| `mae_per_joint` | (6,) | 每关节 MAE |
++| `mse_per_step` | (16,) | 每预测步 MSE（从 step 0 到 step 15） |
++| `mae_per_step` | (16,) | 每预测步 MAE |
++
++`mse_per_step` / `mae_per_step` 是最有价值的数据——它展示了**误差随预测步数（时间跨度）的增长趋势**。
++
++#### 3.2.6 action_curves.png — 动作曲线对比图
++
++- **尺寸**：2684×1475 像素，RGBA
++- **布局**：2×3 子图网格，每个子图对应一个关节
++- **每个子图包含**：
++  - 从 episode 中均匀选取 4 个推理帧（frame 0, 1/3, 2/3, end）
++  - 每个帧展示 16 步的 GT 曲线（实心圆点 + 实线）和 Pred 曲线（方块 + 虚线）
++  - 不同帧用不同颜色区分（viridis colormap）
++- **读图指南**：
++  - **GT 和 Pred 曲线接近** → 模型在该帧的预测准确
++  - **两条曲线分离** → 模型预测偏差
++  - **Pred 曲线 "拉平"** → 预测动作趋于保守/均值化
++  - **不同颜色帧的 Pred 曲线相似** → 模型对状态变化不敏感（mode collapse 迹象）
++
++#### 3.2.7 inference_log.json — 单 episode 推理日志
++
++```json
++{
++  "episode_idx": 0,
++  "num_frames": 315,
++  "num_inferences": 300,
++  "action_chunk_length": 16,
++  "avg_inference_time_s": 0.1447,
++  "std_inference_time_s": 0.0755,
++  "mse_overall": 48.18,
++  "mae_overall": 4.45,
++  "mse_per_joint": [6.32, 84.24, 104.66, 78.84, 2.65, 12.40],
++  "mae_per_joint": [1.99, 6.82, 7.85, 6.91, 1.22, 1.91]
++}
++```
++
++**首帧耗时注意**：Episode 0 的 `std_inference_time_s` 为 0.0755（显著高于其他 episode 的 0.001-0.009），这是因为第一次推理包含 CUDA kernel 编译等预热开销（首帧耗时约 1.4s vs 稳态约 0.14s）。
++
++---
++
++### 3.3 推理结果详细分析
++
++**硬件**：NVIDIA GeForce RTX 5090 (32GB VRAM)，PyTorch 2.11.0+cu128，bfloat16 精度
++
++#### 3.3.1 性能总览
++
++| Episode | Frames | 推理次数 | 耗时 | 平均推理时间 | 推理 FPS | Overall MSE | Overall MAE |
++|---------|--------|---------|------|-------------|---------|-------------|-------------|
++| 0 | 315 | 300 | 43.4s | 0.145s | 6.9 | 48.18 | 4.45 |
++| 1 | 594 | 579 | 78.9s | 0.136s | 7.3 | 25.86 | 3.31 |
++| 2 | 726 | 711 | 98.3s | 0.138s | 7.2 | 18.66 | 2.58 |
++| 3 | 356 | 341 | 47.9s | 0.140s | 7.1 | 31.90 | 3.76 |
++| **总计/平均** | **1991** | **1931** | **258.5s** | **0.140s** | **7.1** | **31.15** | **3.52** |
++
++> 注：总耗时 275.8s 包含模型加载（~22s）和数据 I/O 时间；纯推理耗时约 258.5s。
++
++**推理速度分析**：
++- 稳态推理时间约 **0.136-0.140s/帧**（7.1-7.3 FPS）
++- 首次推理约 1.4s（CUDA warmup），之后稳定在 ~0.14s
++- 模型在 RTX 5090 上以 bfloat16 运行，32GB VRAM 充足，未见显存瓶颈
++
++#### 3.3.2 误差随预测步数增长分析（核心发现）
++
++这是评估模型预测质量最关键的维度。模型对每一步输出 16 步动作块，越远的步数预测越困难。
++
++**4 episode 平均每步 MSE：**
++
++| Step | MSE | vs Step 0 | Step | MSE | vs Step 0 |
++|------|-----|-----------|------|-----|-----------|
++| 0 | 9.09 | 1.0× | 8 | 30.46 | 3.4× |
++| 1 | 10.74 | 1.2× | 9 | 34.61 | 3.8× |
++| 2 | 12.81 | 1.4× | 10 | 37.98 | 4.2× |
++| 3 | 15.07 | 1.7× | 11 | 42.37 | 4.7× |
++| 4 | 18.05 | 2.0× | 12 | 46.96 | 5.2× |
++| 5 | 20.80 | 2.3× | 13 | 51.63 | 5.7× |
++| 6 | 24.04 | 2.6× | 14 | 56.10 | 6.2× |
++| 7 | 27.16 | 3.0× | 15 | 60.57 | 6.7× |
++
++**关键观察**：
++
++1. **误差单调增长**：MSE 从 step 0 的 9.09 增长到 step 15 的 60.57，增长约 **6.7 倍**，说明模型对远期预测的把握明显下降
++
++2. **增长率约 6.4×**：四个 episode 的 step15/step0 MSE 比值分别为 7.2×、6.2×、6.4×、6.4×，一致性高，说明误差增长模式是模型的固有特性而非特定 episode 的噪声
++
++3. **前 4 步误差增长平缓**（step 0→4：2.0×）：在 RTC 部署中通常每 4 步重新推理，这意味着实际执行的 4 步动作误差可控（MAE 2.1→2.8）
++
++4. **Step 8 后加速恶化**（step 8→15：30→61）：8 步之后误差增长斜率变大，说明模型对 0.5 秒后的动作（30fps × 8 ≈ 0.27s）预测能力急剧下降
++
++#### 3.3.3 每关节精度分析
++
++**4 episode 平均每关节指标：**
++
++| 关节 | MSE | MAE | 标准差(ep间) | 预测稳定性 | 评級 |
++|------|-----|-----|-------------|-----------|------|
++| shoulder_pan | 5.74 | 1.70° | ±0.78 | 高 | ★★★★★ |
++| wrist_roll | 2.04 | 1.01° | ±0.53 | 最高 | ★★★★★ |
++| gripper | 9.50 | 1.66° | ±2.98 | 中 | ★★★★ |
++| wrist_flex | 42.86 | 4.84° | ±21.39 | 波动大 | ★★★ |
++| shoulder_lift | 57.40 | 5.59° | ±17.37 | 波动大 | ★★ |
++| elbow_flex | 69.38 | 6.35° | ±23.61 | 波动最大 | ★★ |
++
++**按精度分三档**：
++
++- **高精度（<10 MSE）**：`wrist_roll`(2.0)、`shoulder_pan`(5.7)、`gripper`(9.5)
++  - wrist_roll 物理行程最小（约 -22° ~ +24°），且与抓取动作直接耦合，数据中模式明确
++  - shoulder_pan 是基座旋转关节，在 "pick orange" 任务中运动幅度小
++
++- **中等精度（40-45 MSE）**：`wrist_flex`(42.9)
++  - 腕部俯仰关节，episode 间差异大（MSE 从 22.9 到 78.8），说明不同采集批次的一致性差异较大
++
++- **低精度（55-70 MSE）**：`shoulder_lift`(57.4)、`elbow_flex`(69.4)
++  - shoulder_lift 有系统性负偏差（-3.23°），模型倾向预测更低的抬升
++  - elbow_flex 行程最大（约 -100° ~ +100°），归一化到 [-1,1] 后相对分辨率最低
++  - 这两个关节是执行 "拿起→放下" 的主要承载关节，运动幅度大 + 模式变化多 → 学习难度高
++
++#### 3.3.4 Episode 间差异分析
++
++| Episode | MSE | MAE | 帧数 | 特点 |
++|---------|-----|-----|------|------|
++| 0 | 48.18 | 4.45 | 315 | 最差 — 最短 episode，首帧 warmup 影响 |
++| 1 | 25.86 | 3.31 | 594 | 中等 — 中等长度 episode |
++| 2 | 18.66 | 2.58 | 726 | 最佳 — 最长 episode，动作模式最一致 |
++| 3 | 31.90 | 3.76 | 356 | 较差 — 较短 episode |
++
++**Episode 2 为何最佳？**
++- 最长 episode（726 帧，~24 秒），动作序列完整（抓取→移动→放置→返回）
++- 动作轨迹平滑、可预测性高
++- Bias 接近零（shoulder_pan: +0.19, wrist_roll: -0.13），模型无系统性偏移
++
++**Episode 0 为何最差？**
++- 最短 episode（315 帧，~10.5 秒），可能是不完整或异常采集
++- 首帧 warmup 导致前几次推理延迟异常
++- shoulder_lift 在该 episode 的误差（MSE 84.2）远高于平均（57.4）
++
++#### 3.3.5 动作曲线图分析要点
++
++查看 `action_curves.png` 时关注以下模式：
++
++1. **GT 与 Pred 曲线平行但偏移**（如 Episode 0 shoulder_lift）：系统性偏差，可能源于该 episode 的数据分布与训练集主要分布不一致
++2. **Pred 曲线平滑但 GT 曲线振荡**：模型学习了动作的低频成分，高频抖动被过滤 — 这在机器人控制中是**有利的**，可以减少抖动
++3. **16 步 Pred 曲线趋于平坦**（后期 step 预测值变化小）：模型在长期预测中倾向于输出"安全"的中值动作（Flow Matching 在 t→1 时先验引导效应）
++4. **GT 和 Pred 在 step 0-3 高度重合，之后逐步分离**：符合误差增长规律，说明 RTC 每 4 步重推理的策略是合理的
++
++图的生成逻辑
++以 Episode 0 为例：315 帧视频 → 执行 300 次独立推理（帧 0~299），生成 predictions.npz 形状为 (300, 16, 6)。
++
++绘图时从这 300 次推理中均匀选取 4 个代表帧，展示它们各自预测的 16 步动作块与对应真值的对比：
++
++
++frame_indices = np.linspace(0, 299, 4).astype(int)
++# → [0, 99, 199, 299]  即 Episode 0 的第 1 帧、第 100 帧、第 200 帧、第 300 帧
++图中每个点的含义
++以 shoulder_pan 子图为例，图中有两类数据点：
++
++GT 点（实心圆点 o-，半透明实线）
++X 轴：Chunk step = 0, 1, 2, ..., 15（预测步序号，共 16 步）
++Y 轴：该关节在对应时刻的真实角度值（已去归一化，单位：度）
++一个点 = 从 Parquet 文件中读取的某一帧的 action[joint_index] 值
++数据来源：actions_gt[i : i+16, j]，即从 frame i 开始的后续 16 帧的动作真值
++例如：图中 frame_indices[0]=0 对应的 GT 第 5 个点（step=4, shoulder_pan），其值为：
++
++
++df['action'].iloc[0+4][0]  → shoulder_pan 在 frame 4 的真值动作角度
++Pred 点（方块 s--，虚线）
++X 轴：Chunk step = 0, 1, 2, ..., 15
++Y 轴：模型根据 frame i 的观测（两张图 + 当前状态）预测的未来关节角度
++一个点 = 模型推理输出 result["action.arm_joint_position"][step, j] 去归一化后
++数据来源：BeingHPolicy 根据 frame i 的图像和状态，通过 Flow Matching 4 步 ODE 积分生成的 16 步动作
++四个颜色/帧的含义
++颜色	frame_index	Episode 中的时刻（30fps）	场景状态（推测）
++深紫	f=0	t=0.0s	Episode 起始，机械臂在初始位置
++青绿	f=99	t=3.3s	正在执行抓取动作
++黄绿	f=199	t=6.6s	中间阶段（移动/放置）
++亮黄	f=299	t=10.0s（ep末尾）	Episode 末尾，任务接近完成
++如何解读图中的关系
++
++ X轴:  0    1    2    ...    15  (预测步，未来 0→0.5 秒)
++       |    |    |           |
++       ▼    ▼    ▼           ▼
++      [●──●──●── ... ──●]    ← GT 线（真值，实心圆点）
++      [■--■--■-- ... --■]    ← Pred 线（预测，方块虚线）
++Step 0 的两个点高度一致 → 模型对当前帧的即时动作预测准确
++Step 15 的两个点分离 → 模型对 0.5 秒后的动作预测偏差增大
++GT 实线有上下波动，Pred 虚线趋于平坦 → 模型学到动作低频趋势但过滤了高频细节
++四条 Pred 虚线形态相似但偏移不同 → 模型对不同的初始状态给出了不同的偏置但相似的动作模式
++
++---
++
++### 3.4 总结
++
++| 维度 | 评估 |
++|------|------|
++| 推理速度 | **7.1 FPS** (>5 FPS 实时性要求)，满足实时部署 |
++| 短期预测精度 (step 0-3) | MAE 2.1-2.6°，控制精度可接受 |
++| 长期预测精度 (step 8-15) | MAE 3.6-4.9°，误差显著累积，依赖 RTC 纠正 |
++| 关节一致性 | wrist_roll/gripper 精度高，shoulder_lift/elbow_flex 波动大 |
++| Episode 泛化 | 跨 episode 的 MSE 差异约 2.6×（18.7→48.2），泛化能力中等 |
++| 模型偏差 | 整体无严重系统性偏差，bias 均在 ±3.5° 以内 |
++
++**优化建议**：
++1. RTC 部署时建议 `n_action_steps=4`（当前模型在 step 4 之后误差增速加快）
++2. shoulder_lift 和 elbow_flex 可考虑在训练数据中增加数据增强（运动幅度变化）
++3. Episode 0 类短序列可能需要专门的数据配比优化
++
++---
++
++## 4. 技术参考
++
++### 4.1 关键文件索引
++
++| 文件 | 功能 |
++|------|------|
++| `BeingH/inference/beingh_policy.py` | BeingHPolicy 推理类 |
++| `BeingH/model/beingvla.py` | BeingH VLA 模型定义 |
++| `configs/data_config.py` | KochFollowerDataConfig 数据配置 |
++| `BeingH/dataset/transform/state_action.py` | 状态/动作归一化 |
++| `BeingH/dataset/preprocess.py` | ViT 图像预处理 |
++| `BeingH/utils/video_utils.py` | 视频解码工具 |
++| `scripts/inference/lerobot_record_vla.py` | 真实机器人推理参考 |
++
++### 4.2 模型配置速查
++
++```
++force_image_size:    224
++downsample_ratio:    0.5
++num_image_tokens:    64/image (224/14 * 0.5)^2
++action_chunk_length: 16
++action_token_num:    16
++num_inference_timesteps: 4
++gen_action_type:     prop_hidden
++use_flow_matching:   true
++use_expert:          true
++use_mpg:             false
++use_training_time_rtc: false
++unified_state_dim:   200
++unified_action_dim:  200
++```
++
++### 4.3 Koch 手臂关节空间
++
++```
++observation.state[6] = [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper].pos
++action[6]            = [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper].pos
++
++归一化: min_max → [-1, 1]
++统一空间: arm_joint → [50,55), gripper → [18,19)
++```
+diff --git "a/\346\234\215\345\212\241\347\253\257\351\200\202\351\205\215.md" "b/\346\234\215\345\212\241\347\253\257\351\200\202\351\205\215.md"
+new file mode 100644
+index 0000000..686ca15
+--- /dev/null
++++ "b/\346\234\215\345\212\241\347\253\257\351\200\202\351\205\215.md"
+@@ -0,0 +1,96 @@
++数据格式规范
++上行：客户端 → 服务端（视频流）
++项目	顶部相机	腕部相机
++UDP 端口	192.168.2.12:5002	192.168.2.12:5003
++数据格式	纯 JPEG 字节流，无头部	纯 JPEG 字节流，无头部
++分辨率	640×480	640×480
++编码	cv2.imencode(".jpg", bgr_frame, [cv2.IMWRITE_JPEG_QUALITY, 80])	同左
++单帧大小	~30-60 KB	~30-60 KB
++帧率	15 fps	15 fps
++颜色	BGR（OpenCV 原始格式）	BGR
++每个 UDP 数据报	= 1 个完整 JPEG 文件	= 1 个完整 JPEG 文件
++服务端用 cv2.imdecode(jpeg_bytes, cv2.IMREAD_COLOR) 解码回 BGR ndarray (480, 640, 3)。
++
++下行：服务端 → 客户端（动作序列）
++UDP 端口: 发送到 192.168.2.5:5000
++
++格式: 一个 UDP 数据报 = 一个完整 JSON，UTF-8 编码，无头部。
++
++
++{
++    "sequence_id": 42,
++    "chunk_size": 16,
++    "inference_time_ms": 85.3,
++    "action": {
++        "arm_joint_position": [
++            [10.67, -85.23, -82.21, -39.32, 8.03],
++            [10.72, -85.12, -82.12, -39.40, 8.08],
++            // ... 共 16 步，每步 5 个关节值（度）
++        ],
++        "gripper_position": [
++            [48.77],
++            [48.77],
++            // ... 共 16 步，每步 1 个夹爪值 [0, 100]
++        ]
++    }
++}
++字段	类型	说明
++sequence_id	int	递增，客户端用于丢包检测
++chunk_size	int	固定 16
++inference_time_ms	float	推理耗时
++action.arm_joint_position	float[16][5]	16步×5关节（度）
++action.gripper_position	float[16][1]	16步×1夹爪 [0,100]
++关节顺序: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper]
++
++服务端推理实现 Prompt
++
++实现 Being-H05 远程推理服务端 (server/server_main.py)。
++
++## 输入
++
++从以下两个 UDP 端口接收视频流（纯 JPEG 字节流，无协议头）：
++  - 0.0.0.0:5002 → 顶部相机 JPEG（640×480, BGR, quality=80）
++  - 0.0.0.0:5003 → 腕部相机 JPEG（640×480, BGR, quality=80）
++
++每收到一个数据报就是一张完整 JPEG 帧，cv2.imdecode 解码后即可使用。
++
++## 输出
++
++推理完成后发送 JSON 到 192.168.2.5:5000，格式：
++
++{
++    "sequence_id": <递增int>,
++    "chunk_size": 16,
++    "inference_time_ms": <float>,
++    "action": {
++        "arm_joint_position": [[float×5] ×16],   // 度
++        "gripper_position": [[float×1] ×16]        // [0,100]
++    }
++}
++
++## 推理流程
++
++1. 从 :5002 / :5003 接收最新帧，维护 latest_top_jpeg / latest_wrist_jpeg
++2. 两路帧均非空时触发推理：
++   - cv2.imdecode 解码 JPEG → BGR ndarray (480, 640, 3)
++   - 传入 Being-H05 推理引擎
++3. 推理输出 (16, 5) arm_joint + (16, 1) gripper
++4. 构造上述 JSON → sendto(192.168.2.5:5000)
++5. sequence_id 递增
++
++## 需要修改/新建的文件
++
++- server/__init__.py (新建)
++- server/server_main.py (新建) — 主入口：UDP 接收 + 推理循环
++- server/udp_receiver.py (新建) — 绑定 :5002 / :5003，非阻塞接收
++- server/udp_sender.py (新建) — 发送 JSON 到 192.168.2.5:5000
++- server/inference_engine.py (新建) — Being-H05 模型加载 + infer()
++
++## 参考文件
++
++客户端已有实现（了解数据格式和处理方式）：
++  - client/camera_streamer.py    — JPEG 编码参数：cv2.imencode + quality=80
++  - client/udp_sender.py         — UDP 发送模式：纯 sendto，无头部
++  - client/udp_receiver.py       — UDP 接收模式：非阻塞 recvfrom
++  - client/action_replay.py      — 动作数据格式参考（action.json 解析）
++  - client/robot_executor.py     — 动作执行格式参考（如何将 JSON 转为电机指令）
