@@ -244,7 +244,10 @@ rbnx nodes
 rbnx tools
 
 # 自然语言控制机械臂
-rbnx chat "执行物品分类任务"
+# 单次对话
+rbnx ask "执行物品分类任务"
+# chat需要有Liaison组件
+rbnx chat
 ```
 
 ## 环境变量参考

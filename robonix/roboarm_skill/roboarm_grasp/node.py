@@ -54,18 +54,20 @@ _init_lock = threading.Lock()
 def _ensure_hardware():
     """Late-init arm, camera, and YOLO models on first use."""
     global _arm, _camera, _yolo_models
-    if _arm is not None:
+    if _arm is not None and _camera is not None:
         return
     with _init_lock:
-        if _arm is not None:
+        if _arm is not None and _camera is not None:
             return
         from arm.arm_base import Arm
         from camera.camera_api import Camera
         from object_detect.detect import load_model
         from utils.config_getter import get_config_value
 
-        _arm = Arm()
-        _camera = Camera(color=True, depth=False)
+        if _arm is None:
+            _arm = Arm()
+        if _camera is None:
+            _camera = Camera(color=True, depth=False)
 
         # Load YOLO models for classification
         model_paths = get_config_value("classification_YOLO_model_path", [])
@@ -98,8 +100,13 @@ async def detect_and_grasp(instruction: str) -> str:
         from queue import Queue
         from llm.catch_by_llm import catch_by_instruction
 
-        frame_data = _camera.get_frames()
-        frame = frame_data.get("color", None)
+        start = time.time()
+        while True:
+            frame_data = _camera.get_frames()
+            frame = frame_data.get("color", None)
+            if frame is not None or time.time() - start > 5:
+                break
+            print("retry get_frame")
         if frame is None:
             return json.dumps(
                 {"status": "error", "reason": "无法获取摄像头画面"}, ensure_ascii=False
@@ -158,8 +165,13 @@ async def classify_and_grasp(repeat: int = 1) -> str:
                 _arm.move_to(default_gripper_aside_pos)
                 time.sleep(0.3)
 
-            frame_data = _camera.get_frames()
-            frame = frame_data.get("color", None)
+            start = time.time()
+            while True:
+                frame_data = _camera.get_frames()
+                frame = frame_data.get("color", None)
+                if frame is not None or time.time() - start > 5:
+                    break
+                print("retry get_frame")
             if frame is None:
                 return json.dumps(
                     {"status": "error", "reason": "无法获取摄像头画面"},
