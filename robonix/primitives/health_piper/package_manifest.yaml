@@ -1,0 +1,18 @@
+manifestVersion: 1
+
+build: bash scripts/build.sh
+
+start: bash scripts/start.sh
+
+package:
+  name: com.robonix.primitive.health_piper
+  version: 0.1.0
+  vendor: robonix
+  description: Piper arm health primitive — reads joint temps, error codes, and arm state via piper_sdk on CAN bus.
+  license: MulanPSL-2.0
+
+capabilities:
+  - name: robonix/primitive/health/driver
+  - name: robonix/primitive/health/stream
+
+depends: []

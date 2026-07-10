@@ -1,0 +1,116 @@
+{"ts": "2026-07-06 16:58:00.041794469", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-06 16:58:00.074946720", "level": "info", "tag": "health_piper", "msg": "[health_piper] no robonix/primitive/health/driver contract — skipping lifecycle servicer (this provider doesn't need a Driver(CMD_INIT) handler)."}
+{"ts": "2026-07-06 16:58:00.075224342", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-06 16:58:00.077770886", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:34375"}
+{"ts": "2026-07-06 16:58:00.081535486", "level": "info", "tag": "health_piper", "msg": "[health_piper] state REGISTERED -> ACTIVE"}
+{"ts": "2026-07-06 16:58:00.082442041", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-06 16:58:01.174819249", "level": "info", "tag": "health_piper", "msg": "health_piper: stream started on can0"}
+{"ts": "2026-07-06 16:59:28.427352612", "level": "info", "tag": "health_piper", "msg": "health_piper: stream ended"}
+{"ts": "2026-07-06 16:59:28.901448793", "level": "info", "tag": "health_piper", "msg": "health_piper: stream started on can0"}
+{"ts": "2026-07-06 17:01:21.221382156", "level": "info", "tag": "health_piper", "msg": "health_piper: stream ended"}
+{"ts": "2026-07-10 14:24:04.968646914", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:24:04.981175068", "level": "info", "tag": "health_piper", "msg": "[health_piper] no robonix/primitive/health/driver contract — skipping lifecycle servicer (this provider doesn't need a Driver(CMD_INIT) handler)."}
+{"ts": "2026-07-10 14:24:04.981359530", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:24:04.983045507", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:41397"}
+{"ts": "2026-07-10 14:24:04.986009036", "level": "info", "tag": "health_piper", "msg": "[health_piper] state REGISTERED -> ACTIVE"}
+{"ts": "2026-07-10 14:24:04.986417869", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 14:24:06.165947681", "level": "error", "tag": "health_piper", "msg": "health_piper: connect failed: ['can0' Interface __init__ ERROR]"}
+{"ts": "2026-07-10 14:24:22.771437295", "level": "info", "tag": "health_piper", "msg": "[health_piper] state ACTIVE -> TERMINATED (process signal teardown)"}
+{"ts": "2026-07-10 14:24:27.534664162", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:24:27.547466017", "level": "info", "tag": "health_piper", "msg": "[health_piper] no robonix/primitive/health/driver contract — skipping lifecycle servicer (this provider doesn't need a Driver(CMD_INIT) handler)."}
+{"ts": "2026-07-10 14:24:27.547884396", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:24:27.550117445", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:43175"}
+{"ts": "2026-07-10 14:24:27.554894822", "level": "info", "tag": "health_piper", "msg": "[health_piper] state REGISTERED -> ACTIVE"}
+{"ts": "2026-07-10 14:24:27.555790320", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 14:25:32.389137136", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:25:32.399980933", "level": "info", "tag": "health_piper", "msg": "[health_piper] no robonix/primitive/health/driver contract — skipping lifecycle servicer (this provider doesn't need a Driver(CMD_INIT) handler)."}
+{"ts": "2026-07-10 14:25:32.400289080", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:25:32.402465463", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:35921"}
+{"ts": "2026-07-10 14:25:32.407019943", "level": "info", "tag": "health_piper", "msg": "[health_piper] state REGISTERED -> ACTIVE"}
+{"ts": "2026-07-10 14:25:32.407608293", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 14:31:09.775240593", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:31:09.816668181", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:31:09.819383322", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:37099"}
+{"ts": "2026-07-10 14:31:09.825695457", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 14:31:55.566452277", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:31:55.579856506", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:31:55.582242121", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:45925"}
+{"ts": "2026-07-10 14:31:55.587855127", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 14:33:46.851265860", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:33:46.864979361", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:33:46.867452182", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:45995"}
+{"ts": "2026-07-10 14:33:46.873619091", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 14:34:07.314739715", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:34:07.327796055", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:34:07.330200591", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:35789"}
+{"ts": "2026-07-10 14:34:07.336330228", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 14:34:07.474845965", "level": "info", "tag": "health_piper", "msg": "[health_piper] Driver(cmd=0) received"}
+{"ts": "2026-07-10 14:34:07.476166928", "level": "info", "tag": "health_piper", "msg": "[health_piper] state REGISTERED -> ERROR (Failed to open CAN port can0: ['can0' Interface __init__ ERROR])"}
+{"ts": "2026-07-10 14:34:24.457600203", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:34:24.471977525", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:34:24.474426726", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:41365"}
+{"ts": "2026-07-10 14:34:24.480769929", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 14:36:53.519971377", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:36:53.532068749", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:36:53.534198023", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:44495"}
+{"ts": "2026-07-10 14:36:53.539645072", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 14:40:09.646196315", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:40:09.657603476", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:40:09.659876779", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:43207"}
+{"ts": "2026-07-10 14:40:09.664658181", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 14:40:33.080530057", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:40:33.092748191", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:40:33.094919305", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:46563"}
+{"ts": "2026-07-10 14:40:33.100806065", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 14:40:33.107844402", "level": "info", "tag": "health_piper", "msg": "[health_piper] Driver(cmd=0) received"}
+{"ts": "2026-07-10 14:40:33.124521831", "level": "info", "tag": "health_piper", "msg": "health_piper: CAN port can4 OK"}
+{"ts": "2026-07-10 14:40:33.125048262", "level": "info", "tag": "health_piper", "msg": "[health_piper] state REGISTERED -> INACTIVE"}
+{"ts": "2026-07-10 14:40:33.128887356", "level": "info", "tag": "health_piper", "msg": "[health_piper] Driver(cmd=1) received"}
+{"ts": "2026-07-10 14:40:33.129079148", "level": "info", "tag": "health_piper", "msg": "health_piper: activated on can4"}
+{"ts": "2026-07-10 14:40:33.129151650", "level": "info", "tag": "health_piper", "msg": "[health_piper] state INACTIVE -> ACTIVE"}
+{"ts": "2026-07-10 14:40:33.133929065", "level": "info", "tag": "health_piper", "msg": "health_piper: stream started on can4"}
+{"ts": "2026-07-10 14:41:18.215299787", "level": "info", "tag": "health_piper", "msg": "[health_piper] state ACTIVE -> TERMINATED (process signal teardown)"}
+{"ts": "2026-07-10 14:41:18.216775361", "level": "warn", "tag": "health_piper", "msg": "SetLifecycleState(health_piper, TERMINATED) failed: <_InactiveRpcError of RPC that terminated with:\n\tstatus = StatusCode.UNAVAILABLE\n\tdetails = \"failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:50051: Failed to connect to remote host: Connection refused\"\n\tdebug_error_string = \"UNAVAILABLE:failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:50051: Failed to connect to remote host: Connection refused\"\n>"}
+{"ts": "2026-07-10 14:41:24.329258982", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:41:24.342807598", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:41:24.345268251", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:41425"}
+{"ts": "2026-07-10 14:41:24.351407432", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 14:41:24.503218842", "level": "info", "tag": "health_piper", "msg": "[health_piper] Driver(cmd=0) received"}
+{"ts": "2026-07-10 14:41:24.522007283", "level": "info", "tag": "health_piper", "msg": "health_piper: CAN port can4 OK"}
+{"ts": "2026-07-10 14:41:24.522436933", "level": "info", "tag": "health_piper", "msg": "[health_piper] state REGISTERED -> INACTIVE"}
+{"ts": "2026-07-10 14:41:24.527988348", "level": "info", "tag": "health_piper", "msg": "[health_piper] Driver(cmd=1) received"}
+{"ts": "2026-07-10 14:41:24.528200881", "level": "info", "tag": "health_piper", "msg": "health_piper: activated on can4"}
+{"ts": "2026-07-10 14:41:24.528308366", "level": "info", "tag": "health_piper", "msg": "[health_piper] state INACTIVE -> ACTIVE"}
+{"ts": "2026-07-10 14:41:24.535249687", "level": "info", "tag": "health_piper", "msg": "health_piper: stream started on can4"}
+{"ts": "2026-07-10 14:42:28.857901329", "level": "info", "tag": "health_piper", "msg": "[health_piper] Driver(cmd=3) received"}
+{"ts": "2026-07-10 14:42:28.859811040", "level": "info", "tag": "health_piper", "msg": "[health_piper] state ACTIVE -> TERMINATED"}
+{"ts": "2026-07-10 14:52:36.036562128", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:52:36.045746873", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:52:36.047516042", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:39751"}
+{"ts": "2026-07-10 14:52:36.051050036", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 14:52:36.090927445", "level": "info", "tag": "health_piper", "msg": "[health_piper] Driver(cmd=0) received"}
+{"ts": "2026-07-10 14:52:36.102009768", "level": "info", "tag": "health_piper", "msg": "health_piper: CAN port can4 OK"}
+{"ts": "2026-07-10 14:52:36.102138973", "level": "info", "tag": "health_piper", "msg": "[health_piper] state REGISTERED -> INACTIVE"}
+{"ts": "2026-07-10 14:52:36.105422270", "level": "info", "tag": "health_piper", "msg": "[health_piper] Driver(cmd=1) received"}
+{"ts": "2026-07-10 14:52:36.105665116", "level": "info", "tag": "health_piper", "msg": "health_piper: activated on can4"}
+{"ts": "2026-07-10 14:52:36.105726006", "level": "info", "tag": "health_piper", "msg": "[health_piper] state INACTIVE -> ACTIVE"}
+{"ts": "2026-07-10 14:52:36.109468086", "level": "info", "tag": "health_piper", "msg": "health_piper: stream started on can4"}
+{"ts": "2026-07-10 14:52:44.903738311", "level": "info", "tag": "health_piper", "msg": "[health_piper] Driver(cmd=3) received"}
+{"ts": "2026-07-10 14:52:44.904471246", "level": "info", "tag": "health_piper", "msg": "[health_piper] state ACTIVE -> TERMINATED"}
+{"ts": "2026-07-10 14:52:48.226613671", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 14:52:48.235977186", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 14:52:48.238616531", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:46825"}
+{"ts": "2026-07-10 14:52:48.242198692", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 15:08:49.233841507", "level": "info", "tag": "health_piper", "msg": "registered primitive 'health_piper'"}
+{"ts": "2026-07-10 15:08:49.245651154", "level": "info", "tag": "health_piper", "msg": "wired @provides_grpc robonix/primitive/health/stream -> RobonixPrimitiveHealthStream.StreamHealthState"}
+{"ts": "2026-07-10 15:08:49.247757895", "level": "info", "tag": "health_piper", "msg": "Lifecycle gRPC serving on 0.0.0.0:40063"}
+{"ts": "2026-07-10 15:08:49.252996444", "level": "info", "tag": "health_piper", "msg": "ready -- awaiting Driver(CMD_INIT)"}
+{"ts": "2026-07-10 15:08:49.260438951", "level": "info", "tag": "health_piper", "msg": "[health_piper] Driver(cmd=0) received"}
+{"ts": "2026-07-10 15:08:49.275132855", "level": "info", "tag": "health_piper", "msg": "health_piper: CAN port can4 OK"}
+{"ts": "2026-07-10 15:08:49.275407135", "level": "info", "tag": "health_piper", "msg": "[health_piper] state REGISTERED -> INACTIVE"}
+{"ts": "2026-07-10 15:08:49.279719463", "level": "info", "tag": "health_piper", "msg": "[health_piper] Driver(cmd=1) received"}
+{"ts": "2026-07-10 15:08:49.280001437", "level": "info", "tag": "health_piper", "msg": "health_piper: activated on can4"}
+{"ts": "2026-07-10 15:08:49.280082228", "level": "info", "tag": "health_piper", "msg": "[health_piper] state INACTIVE -> ACTIVE"}
+{"ts": "2026-07-10 15:08:49.286174161", "level": "info", "tag": "health_piper", "msg": "health_piper: stream started on can4"}
+{"ts": "2026-07-10 15:19:10.025053664", "level": "info", "tag": "health_piper", "msg": "[health_piper] state ACTIVE -> TERMINATED (process signal teardown)"}
+{"ts": "2026-07-10 15:19:10.027532607", "level": "warn", "tag": "health_piper", "msg": "SetLifecycleState(health_piper, TERMINATED) failed: <_InactiveRpcError of RPC that terminated with:\n\tstatus = StatusCode.UNAVAILABLE\n\tdetails = \"failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:50051: Failed to connect to remote host: Connection refused\"\n\tdebug_error_string = \"UNAVAILABLE:failed to connect to all addresses; last error: UNKNOWN: ipv4:127.0.0.1:50051: Failed to connect to remote host: Connection refused\"\n>"}
