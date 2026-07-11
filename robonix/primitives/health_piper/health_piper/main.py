@@ -36,6 +36,23 @@ log = logging.getLogger("health_piper")
 JOINT_COUNT = 6
 JOINT_NAMES = [f"joint_{i}" for i in range(1, JOINT_COUNT + 1)]
 
+# foc_status bit → human-readable label (from piper_sdk CAN protocol).
+# Bit 6 (0x40, driver_enable_status) is NOT a fault — it means the driver
+# is enabled.  We exclude it from fault reporting.
+FOC_FAULT_BITS: list[tuple[int, str, str]] = [
+    # (bit, attr_name, human_label)
+    (0, "voltage_too_low",      "电源电压过低"),
+    (1, "motor_overheating",    "电机过温"),
+    (2, "driver_overcurrent",   "驱动器过流"),
+    (3, "driver_overheating",   "驱动器过温"),
+    (4, "collision_status",     "碰撞保护触发"),
+    (5, "driver_error_status",  "驱动器错误"),
+    (7, "stall_status",         "堵转保护触发"),
+]
+# Bit 6 mask: only this bit → status code 0x40, meaning "driver enabled, no fault".
+FOC_ENABLE_BIT = 0x40
+FOC_FAULT_MASK = 0xBF  # all bits except driver_enable_status
+
 # Arm status enum → safety aggregate_state (Soma SafetyState IDL).
 # 0=NORMAL  1=FAULT  2=ESTOP
 ARM_STATUS_TO_STATE = {
@@ -127,10 +144,17 @@ def stream_health(request, context) -> Iterator[health_pb2.HealthState]:
 
 
 def _collect(piper: "C_PiperInterface_V2") -> health_pb2.HealthState:
-    """Read Piper sensors and return a HealthState proto."""
+    """Read Piper sensors and return a HealthState proto.
+
+    FOC status codes are filtered: bit 6 (0x40, driver_enable_status) is
+    masked out before reporting, because it indicates the driver is enabled
+    rather than a fault condition.  Individual fault bits are reported as
+    separate SensorReadings with human-readable labels in the name path.
+    """
     temperatures: list[int] = []
-    error_codes: list[int] = []
+    fault_codes: list[int] = []     # masked (bit 6 excluded)
     enables: list[bool] = []
+    foc_statuses: list = []         # parsed FOC_Status objects for fault labels
 
     # Motor low-speed info (temperatures, error codes, enable states).
     try:
@@ -141,14 +165,17 @@ def _collect(piper: "C_PiperInterface_V2") -> health_pb2.HealthState:
         ]
         for m in motors:
             temperatures.append(m.motor_temp)
-            error_codes.append(m.foc_status_code)
+            # Mask out bit 6 (driver_enable_status) — it is NOT a fault.
+            fault_codes.append(m.foc_status_code & FOC_FAULT_MASK)
             enables.append(m.foc_status.driver_enable_status)
+            foc_statuses.append(m.foc_status)
     except Exception:
         log.warning("health_piper: GetArmLowSpdInfoMsgs failed")
         for _ in range(JOINT_COUNT):
             temperatures.append(-1)
-            error_codes.append(0)
+            fault_codes.append(0)
             enables.append(False)
+            foc_statuses.append(None)
 
     # Arm-level status (safety state).
     arm_state = 1  # FAULT
@@ -168,17 +195,27 @@ def _collect(piper: "C_PiperInterface_V2") -> health_pb2.HealthState:
             name=f"{path}/motor_temp",
             temp_c=float(temperatures[i]),
         ))
-        # Error code
-        if error_codes[i] != 0:
+        # Fault error code — only report when there are real fault bits
+        # (bit 6 enable already masked out).
+        if fault_codes[i] != 0:
             readings.append(health_pb2.SensorReading(
                 name=f"{path}/error",
-                current_a=float(error_codes[i]),
+                current_a=float(fault_codes[i]),
             ))
         # Enable state
         readings.append(health_pb2.SensorReading(
             name=f"{path}/enabled",
             current_a=1.0 if enables[i] else 0.0,
         ))
+        # Individual fault labels — one reading per active fault bit.
+        if foc_statuses[i] is not None:
+            foc = foc_statuses[i]
+            for _bit, attr, label in FOC_FAULT_BITS:
+                if getattr(foc, attr, False):
+                    readings.append(health_pb2.SensorReading(
+                        name=f"{path}/fault/{label}",
+                        current_a=1.0,
+                    ))
 
     # Arm-level safety state
     readings.append(health_pb2.SensorReading(
